@@ -1,0 +1,32 @@
+{
+  "name": "betweenus-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx --watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "test": "node --import tsx --test --test-isolation=none test/*.test.ts",
+    "migrate": "node --import tsx src/migrate.ts",
+    "format": "prettier --write src test package.json tsconfig.json README.md docs .github compose.yaml",
+    "format:check": "prettier --check src test package.json tsconfig.json README.md docs .github compose.yaml",
+    "dev:demo": "DEMO_MODE=true node --import tsx --watch src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "fastify": "^5.0.0",
+    "jose": "^6.0.0",
+    "pg": "^8.13.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.0",
+    "prettier": "^3.10.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
