@@ -19,6 +19,8 @@ curl http://127.0.0.1:3001/v1/debts \
   -d '{"borrowerEmail":"john@example.com","amountMinor":12550,"currency":"AED","description":"Dinner"}'
 ```
 
+For step-by-step project connection, email OTP settings and private environment setup, see [Connect Supabase](docs/CONNECT_SUPABASE.md).
+
 ## Persistent setup
 
 1. Create a PostgreSQL database under your own account. For local Docker: export a strong `POSTGRES_PASSWORD`, run `docker compose up -d`, then export `DATABASE_URL=postgresql://betweenus:YOUR_PASSWORD@localhost:5432/betweenus` (URL-encode special characters). The named volume keeps data across restarts. Removing the volume deletes data.
