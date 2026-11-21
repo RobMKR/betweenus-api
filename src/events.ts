@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ApiError } from "./domain.js";
 import type { SavedPerson, Vault, VaultDetail } from "./directory.js";
-export const participantRef = z.union([z.literal("self"), z.string().uuid()]);
+import { uuidInput, textInput } from "./validation.js";
+export const participantRef = z.union([z.literal("self"), uuidInput]);
 const minor = z.number().int().min(1).max(1_000_000_000);
 const calendarDate = z
   .string()
@@ -16,8 +17,8 @@ const calendarDate = z
   );
 export const eventInput = z
   .object({
-    clientRequestId: z.string().uuid(),
-    title: z.string().trim().min(1).max(200),
+    clientRequestId: uuidInput,
+    title: textInput(200),
     date: calendarDate,
     currency: z.literal("AED"),
     totalMinor: minor,
@@ -64,17 +65,28 @@ export const eventInput = z
       issue(
         "Manual allocations must cover each selected participant exactly once and sum to the total.",
       );
-  });
+  })
+  .transform((input) =>
+    input.splitMode === "manual"
+      ? {
+          ...input,
+          // Allocation rows are a mapping; participant order remains meaningful.
+          allocations: input.participantIds.map((participantId) =>
+            input.allocations!.find(
+              (row) => row.participantId === participantId,
+            )!,
+          ),
+        }
+      : input,
+  );
 export const paymentInput = z
   .object({
-    clientRequestId: z.string().uuid(),
+    clientRequestId: uuidInput,
     participantId: participantRef,
     amountMinor: minor,
   })
   .strict();
-export const undoInput = z
-  .object({ clientRequestId: z.string().uuid() })
-  .strict();
+export const undoInput = z.object({ clientRequestId: uuidInput }).strict();
 export const archiveInput = z.object({ archived: z.boolean() }).strict();
 export type EventInput = z.infer<typeof eventInput>;
 export type PaymentInput = z.infer<typeof paymentInput>;

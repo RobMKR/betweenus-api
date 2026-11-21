@@ -110,6 +110,7 @@ export class MemoryDirectory implements DirectoryStore {
     return structuredClone(this.owned(user, id));
   }
   async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
     const detail = this.owned(user, id);
     if (detail.vault.archived !== archived) {
       const event = this.event(
@@ -231,6 +232,7 @@ export class PostgresDirectory implements DirectoryStore {
     }
   }
   async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
     return this.transaction(async (client) => {
       const row = (
         await client.query<{ archived: boolean }>(

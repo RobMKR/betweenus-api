@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ApiError, type Identity } from "./domain.js";
+import { uuidInput } from "./validation.js";
 import type { DirectoryStore } from "./directory-store.js";
 import type { Vault, VaultDetail } from "./directory.js";
 import type { SqlClient, SqlPool } from "./store.js";
@@ -99,6 +100,7 @@ export class MemoryEvents extends Summaries implements EventStore {
     return row.event;
   }
   async list(user: Identity, vaultId?: string) {
+    if (vaultId !== undefined) vaultId = uuidInput.parse(vaultId);
     if (vaultId) await this.directory.vault(user, vaultId);
     return [...this.events.values()]
       .filter(
@@ -109,6 +111,7 @@ export class MemoryEvents extends Summaries implements EventStore {
       .map((row) => viewEvent(row.event));
   }
   async get(user: Identity, id: string) {
+    id = uuidInput.parse(id);
     return viewEvent(this.owned(user, id));
   }
   private write(
@@ -131,6 +134,7 @@ export class MemoryEvents extends Summaries implements EventStore {
     });
   }
   async create(user: Identity, vaultId: string, raw: EventInput) {
+    vaultId = uuidInput.parse(vaultId);
     const input = eventInput.parse(raw);
     return this.write(
       user,
@@ -144,6 +148,7 @@ export class MemoryEvents extends Summaries implements EventStore {
     );
   }
   async pay(user: Identity, id: string, raw: PaymentInput) {
+    id = uuidInput.parse(id);
     const input = paymentInput.parse(raw);
     return this.write(
       user,
@@ -159,6 +164,8 @@ export class MemoryEvents extends Summaries implements EventStore {
     );
   }
   async undo(user: Identity, id: string, paymentId: string, raw: UndoInput) {
+    id = uuidInput.parse(id);
+    paymentId = uuidInput.parse(paymentId);
     const input = undoInput.parse(raw);
     return this.write(
       user,
@@ -174,6 +181,7 @@ export class MemoryEvents extends Summaries implements EventStore {
     );
   }
   async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
     return this.serial(async () =>
       this.detail(user, await this.directory.archive(user, id, archived)),
     );
@@ -265,12 +273,14 @@ export class PostgresEvents extends Summaries implements EventStore {
     }));
   }
   async list(user: Identity, vaultId?: string) {
+    if (vaultId !== undefined) vaultId = uuidInput.parse(vaultId);
     return this.transaction(async (client) => {
       if (vaultId) await this.vault(client, user, vaultId);
       return (await this.events(client, user, { vaultId })).map(viewEvent);
     }, true);
   }
   async get(user: Identity, id: string) {
+    id = uuidInput.parse(id);
     return this.transaction(async (client) => {
       const event = (await this.events(client, user, { id }))[0];
       if (!event) throw missingEvent();
@@ -328,6 +338,7 @@ export class PostgresEvents extends Summaries implements EventStore {
     });
   }
   async create(user: Identity, vaultId: string, raw: EventInput) {
+    vaultId = uuidInput.parse(vaultId);
     const input = eventInput.parse(raw);
     return this.write(
       user,
@@ -386,6 +397,7 @@ export class PostgresEvents extends Summaries implements EventStore {
     );
   }
   async pay(user: Identity, id: string, raw: PaymentInput) {
+    id = uuidInput.parse(id);
     const input = paymentInput.parse(raw);
     return this.write(
       user,
@@ -403,6 +415,8 @@ export class PostgresEvents extends Summaries implements EventStore {
     );
   }
   async undo(user: Identity, id: string, paymentId: string, raw: UndoInput) {
+    id = uuidInput.parse(id);
+    paymentId = uuidInput.parse(paymentId);
     const input = undoInput.parse(raw);
     return this.write(
       user,
@@ -420,6 +434,7 @@ export class PostgresEvents extends Summaries implements EventStore {
     );
   }
   async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
     return this.detail(user, await this.directory.archive(user, id, archived));
   }
 }

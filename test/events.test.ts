@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import { ZodError } from "zod";
 import { buildApp } from "../src/app.js";
 import { demoAuth } from "../src/auth.js";
 import { createDebt } from "../src/domain.js";
@@ -713,3 +714,303 @@ test(
     }
   },
 );
+
+async function reviewInvariantCases(
+  store: Store,
+  app: Awaited<ReturnType<typeof buildApp>>,
+) {
+  const person = await store.directory.createPerson(owner, {
+    name: "Case person",
+    source: "custom",
+  });
+  const vault = await store.directory.createVault(owner, {
+    title: "Review regressions",
+    kind: "temporary",
+    memberIds: [],
+  });
+  const nonce = randomUUID();
+  const input = base(["self", person.id.toUpperCase()], {
+    clientRequestId: nonce.toUpperCase(),
+    totalMinor: 100,
+    splitMode: "manual",
+    allocations: [
+      { participantId: person.id.toUpperCase(), shareMinor: 60 },
+      { participantId: "self", shareMinor: 40 },
+    ],
+  });
+  const event = await store.events.create(
+    owner,
+    vault.vault.id.toUpperCase(),
+    input,
+  );
+  assert.equal(event.vaultId, vault.vault.id);
+  assert.deepEqual(
+    event.participants.map((p) => p.participantId),
+    ["self", person.id],
+  );
+  assert.deepEqual(
+    event.participants.map((p) => p.shareMinor),
+    [40, 60],
+  );
+  const equivalent = {
+    ...input,
+    clientRequestId: nonce,
+    participantIds: ["self", person.id],
+    allocations: [
+      { participantId: "self", shareMinor: 40 },
+      { participantId: person.id, shareMinor: 60 },
+    ],
+  };
+  const again = await store.events.create(owner, vault.vault.id, equivalent);
+  assert.equal(again.id, event.id);
+  assert.equal(
+    (await store.events.list(owner, vault.vault.id.toUpperCase())).length,
+    1,
+  );
+  const payNonce = randomUUID();
+  const payment = {
+    clientRequestId: payNonce.toUpperCase(),
+    participantId: person.id.toUpperCase(),
+    amountMinor: 10,
+  };
+  const paid = await store.events.pay(owner, event.id.toUpperCase(), payment);
+  assert.equal(paid.participants[1].remainingMinor, 50);
+  const retryPay = await store.events.pay(owner, event.id, {
+    ...payment,
+    clientRequestId: payNonce,
+    participantId: person.id,
+  });
+  assert.equal(retryPay.payments.length, 1);
+  assert.equal(retryPay.payments[0].id, paid.payments[0].id);
+  const undoNonce = randomUUID();
+  await store.events.undo(
+    owner,
+    event.id.toUpperCase(),
+    paid.payments[0].id.toUpperCase(),
+    { clientRequestId: undoNonce.toUpperCase() },
+  );
+  const undone = await store.events.undo(owner, event.id, paid.payments[0].id, {
+    clientRequestId: undoNonce,
+  });
+  assert.equal(undone.payments.length, 2);
+  assert.equal(undone.participants[1].remainingMinor, 60);
+  assert.equal(
+    (
+      await store.events.create(owner, vault.vault.id, {
+        ...equivalent,
+        allocations: [...equivalent.allocations].reverse(),
+      })
+    ).payments.length,
+    2,
+  ); // fresh response, one existing operation
+  await assert.rejects(
+    store.events.create(owner, vault.vault.id, {
+      ...equivalent,
+      allocations: [
+        { participantId: "self", shareMinor: 41 },
+        { participantId: person.id, shareMinor: 59 },
+      ],
+    }),
+    { status: 409 },
+  );
+  await assert.rejects(
+    store.events.create(owner, vault.vault.id, {
+      ...equivalent,
+      participantIds: [person.id, "self"],
+    }),
+    { status: 409 },
+  );
+  await assert.rejects(
+    store.events.create(
+      owner,
+      vault.vault.id,
+      base([person.id, person.id.toUpperCase()]),
+    ),
+    (error) => error instanceof ZodError,
+  );
+  await assert.rejects(
+    store.events.create(
+      owner,
+      vault.vault.id,
+      base([person.id], { title: "Invalid\0title" }),
+    ),
+    (error) => error instanceof ZodError,
+  );
+  assert.equal((await store.events.list(owner, vault.vault.id)).length, 1);
+  const otherPayer = base(["self", person.id.toUpperCase()], {
+    totalMinor: 100,
+    payerId: person.id.toUpperCase(),
+  });
+  const otherEvent = await store.events.create(
+    owner,
+    vault.vault.id,
+    otherPayer,
+  );
+  assert.equal(otherEvent.payerId, person.id);
+  assert.equal(otherEvent.balance.payableMinor, 50);
+  assert.equal(
+    (
+      await store.events.create(owner, vault.vault.id, {
+        ...otherPayer,
+        clientRequestId: otherPayer.clientRequestId.toUpperCase(),
+        participantIds: ["self", person.id],
+        payerId: person.id,
+      })
+    ).id,
+    otherEvent.id,
+  );
+  assert.equal(
+    (await store.events.get(owner, event.id.toUpperCase())).id,
+    event.id,
+  );
+  const archived = await store.events.archive(
+    owner,
+    vault.vault.id.toUpperCase(),
+    true,
+  );
+  assert.equal(archived.vault.archived, true);
+  assert.equal(archived.vault.eventCount, 2);
+  await store.events.archive(owner, vault.vault.id, false);
+  const equalIntent = base(["self", person.id], { totalMinor: 101 });
+  const equalEvent = await store.events.create(
+    owner,
+    vault.vault.id,
+    equalIntent,
+  );
+  assert.equal(equalEvent.balance.receivableMinor, 50);
+  await assert.rejects(
+    store.events.create(owner, vault.vault.id, {
+      ...equalIntent,
+      participantIds: [person.id, "self"],
+    }),
+    { status: 409 },
+  );
+  const call = (method: "GET" | "POST", url: string, payload?: unknown) =>
+    app.inject({
+      method,
+      url,
+      headers: { authorization: "Bearer demo-lender" },
+      ...(payload === undefined ? {} : { payload: payload as object }),
+    });
+  const httpInput = base(["self", person.id.toUpperCase()], {
+    totalMinor: 101,
+    clientRequestId: randomUUID().toUpperCase(),
+    splitMode: "manual",
+    allocations: [
+      { participantId: person.id.toUpperCase(), shareMinor: 81 },
+      { participantId: "self", shareMinor: 20 },
+    ],
+  });
+  const route = `/v1/vaults/${vault.vault.id.toUpperCase()}/events`;
+  const created = await call("POST", route, httpInput);
+  assert.equal(created.statusCode, 201);
+  const saved = created.json().event;
+  const httpEquivalent = {
+    ...httpInput,
+    clientRequestId: httpInput.clientRequestId.toLowerCase(),
+    participantIds: ["self", person.id],
+    allocations: [
+      { participantId: "self", shareMinor: 20 },
+      { participantId: person.id, shareMinor: 81 },
+    ],
+  };
+  const repeated = await call("POST", route, httpEquivalent);
+  assert.equal(repeated.statusCode, 201);
+  assert.equal(repeated.json().event.id, saved.id);
+  assert.equal(
+    (
+      await call("POST", route, {
+        ...httpEquivalent,
+        allocations: [
+          { participantId: "self", shareMinor: 21 },
+          { participantId: person.id, shareMinor: 80 },
+        ],
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(
+    (
+      await call("POST", route, {
+        ...httpEquivalent,
+        participantIds: [person.id, "self"],
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(
+    (
+      await call("POST", route, {
+        ...httpEquivalent,
+        clientRequestId: randomUUID(),
+        title: "Invalid\0title",
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (await call("POST", route, base([person.id, person.id.toUpperCase()])))
+      .statusCode,
+    400,
+  );
+
+  assert.equal(
+    (await call("GET", `/v1/events/${saved.id.toUpperCase()}`)).statusCode,
+    200,
+  );
+  const httpPay = {
+    clientRequestId: randomUUID().toUpperCase(),
+    participantId: person.id.toUpperCase(),
+    amountMinor: 1,
+  };
+  const httpPaid = await call(
+    "POST",
+    `/v1/events/${saved.id.toUpperCase()}/payments`,
+    httpPay,
+  );
+  assert.equal(httpPaid.statusCode, 200);
+  const httpUndone = await call(
+    "POST",
+    `/v1/events/${saved.id.toUpperCase()}/payments/${httpPaid.json().event.payments[0].id.toUpperCase()}/undo`,
+    { clientRequestId: randomUUID().toUpperCase() },
+  );
+  assert.equal(httpUndone.statusCode, 200);
+  const httpRetried = await call("POST", `/v1/events/${saved.id}/payments`, {
+    ...httpPay,
+    clientRequestId: httpPay.clientRequestId.toLowerCase(),
+    participantId: person.id,
+  });
+  assert.equal(httpRetried.statusCode, 200);
+  assert.equal(httpRetried.json().event.payments.length, 2);
+}
+test("memory event routes preserve UUID case identity and semantic manual retry equivalence", async () => {
+  const store = new MemoryStore();
+  const app = await buildApp({ store, auth: demoAuth(), demo: true });
+  try {
+    await reviewInvariantCases(store, app);
+  } finally {
+    await app.close();
+  }
+});
+test("SQL event routes preserve UUID case identity and semantic manual retry equivalence", async () => {
+  const { db, store } = await sqlFixture();
+  let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+  try {
+    for (const file of [
+      "001_initial.sql",
+      "002_people_vaults.sql",
+      "003_account_events.sql",
+    ])
+      await db.exec(
+        await readFile(
+          new URL(`../migrations/${file}`, import.meta.url),
+          "utf8",
+        ),
+      );
+    app = await buildApp({ store, auth: demoAuth(), demo: true });
+    await reviewInvariantCases(store, app);
+  } finally {
+    if (app) await app.close();
+    else await store.close();
+  }
+});

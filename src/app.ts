@@ -167,10 +167,7 @@ export async function buildApp(options: {
     const user = await identity(req.headers.authorization);
     return options.store.events.detail(
       user,
-      await options.store.directory.vault(
-        user,
-        uuidInput.parse(req.params.id),
-      ),
+      await options.store.directory.vault(user, uuidInput.parse(req.params.id)),
     );
   });
   for (const add of [true, false])
