@@ -1,6 +1,12 @@
 import pg from "pg";
+import {
+  MemoryDirectory,
+  PostgresDirectory,
+  type DirectoryStore,
+} from "./directory-store.js";
 import { transition, visible, type Debt, type Identity } from "./domain.js";
 export interface Store {
+  readonly directory: DirectoryStore;
   listFor(user: Identity): Promise<Debt[]>;
   create(debt: Debt): Promise<Debt>;
   respond(
@@ -12,6 +18,7 @@ export interface Store {
   close(): Promise<void>;
 }
 export class MemoryStore implements Store {
+  readonly directory = new MemoryDirectory();
   private debts: Debt[] = [];
   async listFor(user: Identity) {
     return structuredClone(this.debts.filter((d) => visible(d, user)));
@@ -49,11 +56,13 @@ export interface SqlPool {
 }
 export class PostgresStore implements Store {
   private pool: SqlPool;
+  readonly directory: DirectoryStore;
   constructor(url: string | SqlPool) {
     this.pool =
       typeof url === "string"
         ? new pg.Pool({ connectionString: url, max: 5 })
         : url;
+    this.directory = new PostgresDirectory(this.pool);
   }
   async listFor(user: Identity) {
     const { rows } = await this.pool.query<Debt>(
