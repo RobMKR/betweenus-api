@@ -13,6 +13,18 @@ These instructions apply throughout this repository. Keep changes understandable
 - Astra reviews the latest head independently using [.agents/skills/review-pr/SKILL.md](.agents/skills/review-pr/SKILL.md). An author cannot approve their own change. After a new commit, review its changes and rerun affected checks; prior approval is not evidence for the new head.
 - Merge only after the issue acceptance criteria are met, actionable review findings are resolved, required CI has succeeded for the exact latest head, and the session authorizes merge. Missing, pending, cancelled or failing required checks are not success. Do not bypass repository protections. Branch protection enforcement must be checked, not assumed.
 
+## Bug report to merge
+
+Every distinct bug follows this seven-step lifecycle, including bugs discovered during implementation or review:
+
+1. The owner reports the bug to Astra; development/review discoveries are also brought to Astra.
+2. Astra immediately opens one issue per distinct bug **before handing off investigation or implementation**. Link an existing exact duplicate instead of opening another. Record observed symptoms, available reproduction steps, expected/actual behavior, platform/context and acceptance criteria. Mark unknown facts as unknown; optional missing details must not delay filing. Astra must not prescribe an unverified root cause or implementation.
+3. Astra delegates the issue to Sol in the session. Sol independently investigates the cause and implements the fix in an isolated issue branch/worktree. This is session delegation, not assignment to a presumed Sol GitHub account or an autonomous runner.
+4. Sol opens the linked PR through the existing Worker publishing bridge, with evidence against the issue criteria.
+5. Astra independently reviews the current PR head, behavior and evidence; Astra does not silently implement fixes while reviewing.
+6. Sol resolves review comments and updates the PR. Any newly discovered distinct bug is first filed or linked by Astra as in step 2, then delegated before its investigation/fix; a correction for the already-tracked bug uses that existing issue.
+7. Astra re-reviews the latest head, approves and merges only after blocking findings are resolved, applicable CI passes on that head and merge is authorized. New commits require another review; approval of an older head is insufficient.
+
 ## Architecture and correctness
 
 - Keep one modular Fastify/TypeScript monolith: routes validate and authenticate, domain code defines invariants, and storage owns persistence. Prefer small existing patterns over new frameworks, services, abstractions or shared platforms without a concrete need.
