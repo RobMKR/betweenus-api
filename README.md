@@ -8,6 +8,8 @@ Each development issue is the canonical implementation specification: problem, d
 
 Sol inspects the repository against that specification before implementing; clarify material blockers before dependent work, record assumptions, and update the issue before implementing material scope or acceptance changes. Keep detail proportional: a simple fix needs a concise problem, expected result, acceptance criterion and check, not a separate full specification document. The flow is issue/spec → isolated implementation branch → Astra independent review → required CI on the latest SHA → authorized merge. The PR maps changes and observed checks to the issue's acceptance criteria.
 
+For bugs, including defects found during implementation/review: report to Astra → Astra immediately files one issue per distinct bug (or links an exact duplicate) → delegates Sol to independently investigate/fix → Sol opens the linked PR → Astra reviews → Sol resolves comments → Astra re-reviews the latest head, approves and merges after passing CI and authorization. Filing records symptoms and expected behavior, not an unverified prescribed cause; optional missing details do not delay it. See the [seven-step bug lifecycle](AGENTS.md#bug-report-to-merge).
+
 ## Run the local pilot
 
 ```sh

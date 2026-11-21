@@ -2,6 +2,14 @@
 
 Read [AGENTS.md](../AGENTS.md) first. Sol implements and Astra independently reviews. This is a manual issue-to-PR process; no unattended dispatcher, OIDC deployment or autonomous agent review is installed. The [manual session bridge](SESSION_BRIDGE.md) can publish already-written PR/review results under scoped Apps after owner setup; it does not perform AI work. Backend deployment remains a separate authorized manual operation. Publishing bridge implementation is tracked in [issue #2](https://github.com/betweenus-tech/betweenus-api/issues/2).
 
+## Bug intake and roles
+
+The bug lifecycle is: report to Astra → Astra immediately files/reuses the exact bug issue → Astra delegates and Sol independently investigates/implements → Sol opens a linked PR → Astra reviews → Sol resolves comments → Astra re-reviews the latest head, approves and merges after passing CI and authorization. See [AGENTS.md](../AGENTS.md#bug-report-to-merge) for the seven steps.
+
+This also applies to each distinct bug found during development or review: file or link its issue before investigation/implementation handoff, rather than bundling an untracked fix. Filing captures observed symptoms, available reproduction, expected/actual behavior, platform/context and acceptance criteria; unknown facts stay unknown. Optional missing details do not delay filing, and Astra does not prescribe an unverified diagnosis or implementation. Delegation happens in the current session, not through an assumed Sol account or unattended agent.
+
+## Issue to reviewed PR
+
 1. Create or select the canonical issue specification using the [work item template](../.github/ISSUE_TEMPLATE/work_item.md). Define the problem, desired behavior/examples, scope/non-goals, numbered AC1/AC2 acceptance criteria, relevant API/data/authorization constraints, verification and unresolved decisions. Detail scales with risk: a simple fix can state a concise problem, expected result, criterion and check; no separate full spec document is required. Mark irrelevant details N/A.
 2. Fetch current remote state and create an isolated branch/worktree. For example, from the repository:
 
@@ -12,8 +20,8 @@ Read [AGENTS.md](../AGENTS.md) first. Sol implements and Astra independently rev
 
 3. Inspect existing source, callers, API contracts, storage and tests against the issue before editing. Resolve material ambiguity before dependent implementation; continue useful independent work and record nonblocking assumptions. Capture clarified decisions and material scope/acceptance changes in the issue before implementing them. Implement only that specification in the new worktree. Install dependencies there with `npm ci` if needed; keep credentials in ignored private environment settings.
 4. Validate the final change against each acceptance criterion. Commit and push the feature branch, then use the [manual Worker publishing bridge](SESSION_BRIDGE.md) to open a PR referencing `Closes #N` where configured. Map AC IDs to changes and observed checks/results using the [PR template](../.github/pull_request_template.md); explicitly mark unmet criteria, unavailable checks and limitations. Do not push directly to `main`.
-5. Astra follows the [review procedure](../.agents/skills/review-pr/SKILL.md) against the exact latest head. Resolve findings on the same branch, then obtain an updated review and affected checks after new commits.
-6. Merge only when acceptance, independent review, repository approval rules and required exact-head CI are satisfied and merge is authorized. Do not treat these documents as proof that branch protections exist. Do not use the shared author account to self-approve; record independent reviewer evidence and any formal-approval limitation honestly.
+5. Astra follows the [review procedure](../.agents/skills/review-pr/SKILL.md) against the exact latest head. Sol resolves comments on the same branch; Astra re-reviews the latest head and affected checks after new commits.
+6. Astra approves and merges only when acceptance, independent latest-head review, repository approval rules and required exact-head CI are satisfied and merge is authorized. Do not treat these documents as proof that branch protections exist. Do not use the shared author account to self-approve; record independent reviewer evidence and any formal-approval limitation honestly.
 
 ## Verification commands
 
