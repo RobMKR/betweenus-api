@@ -23,7 +23,7 @@ The mobile app asks contact permission only in the native selection flow. It sub
 
 `GET /v1/vaults` returns `{vaults: Vault[]}`. `POST /v1/vaults` accepts `{title,kind,memberIds}` and returns 201 `{vault,members,history}`. Title is trimmed, 1–100 characters; kind is `temporary` or `permanent`; memberIds is an ordered array of 0–100 distinct UUIDs from this owner's saved People. There is no vault date. The owner is implicit and never a saved Person/roster slot.
 
-Vault has `id`, `title`, `kind`, `archived` (initially false), ordered `memberIds`, ISO `createdAt` and `updatedAt`. This slice has no archive transition. Initial creation validates every selected person and commits vault, roster and history together; a foreign/missing person rolls back the entire creation.
+Vault has `id`, `title`, `kind`, `archived` (initially false), ordered `memberIds`, ISO `createdAt` and `updatedAt`. Archive/reactivate and extended event summaries are provided by the [account event contract](ACCOUNT_EVENTS.md). Initial creation validates every selected person and commits vault, roster and history together; a foreign/missing person rolls back the entire creation.
 
 - `GET /v1/vaults/:id` returns `{vault,members: Person[],history}`.
 - `POST /v1/vaults/:id/members` `{personId}` adds a saved Person at the end.
@@ -41,7 +41,7 @@ Apply additive migration `002_people_vaults.sql` with the existing migration run
 
 Demo mode exposes the same routes with ephemeral memory, isolated by its fake identities. Real account mode uses PostgreSQL; storage survives restarts. Device-only People/vaults are separate mobile records and are not automatically uploaded or merged with account data. No People edit/delete, collaborative membership permissions, automatic borrower/debt creation, messaging or notification is implemented here. A debt still requires an explicit borrower email and that verified borrower's acceptance.
 
-**Account events are implemented separately in [issue #13](https://github.com/betweenus-tech/betweenus-api/issues/13), not by these base endpoints.** The owner requires all requested features in both account and offline modes; this base slice is a foundation, not the completed event flow. The linked event work includes immutable participant/name/share snapshots, explicit self/payer semantics, equal/manual integer allocations, atomic idempotent saves, and repayment/reversal history. Roster changes must not rewrite event history. Existing accepted debt balances remain separate from the private vault-event ledger. Do not describe roster storage alone as event sync or restrict the full requested feature to offline-only. No paid/free gating or automatic device-data upload is introduced.
+**Account event persistence is a separate [contract](ACCOUNT_EVENTS.md), tracked in [issue #13](https://github.com/betweenus-tech/betweenus-api/issues/13).** It adds explicit create/read/payment/undo/archive routes and event summaries; base roster routes alone are not event sync. The owner requires the feature in both account and offline modes. Existing accepted debt balances remain separate from the private vault-event ledger. No paid/free gating or automatic device-data upload is introduced.
 
 ## Verification
 

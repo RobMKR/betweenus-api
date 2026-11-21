@@ -51,7 +51,8 @@ export type Vault = {
 };
 export type VaultHistory = {
   id: string;
-  action: "created" | "member_added" | "member_removed";
+  action:
+    "created" | "member_added" | "member_removed" | "archived" | "reactivated";
   personId: string | null;
   actorId: string;
   createdAt: string;
