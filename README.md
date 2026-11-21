@@ -78,3 +78,5 @@ For an existing Ubuntu EC2 instance, see [EC2 release deployment](docs/DEPLOY_EC
 For development, follow the [issue-to-PR contributor workflow](docs/CONTRIBUTING.md) and [engineering standards](AGENTS.md). Sol implements; Astra independently reviews the latest commit before merge. This process and backend deployments are currently manual.
 
 The [manual session publishing bridge](docs/SESSION_BRIDGE.md) can post actual session-authored PRs and independent reviews under scoped GitHub Apps. It does no AI work, merges or deployments, and requires no AI API billing.
+
+Account saved People and owner-private vault rosters are documented in [People and vault contracts](docs/PEOPLE_VAULTS.md). Apply migration `002_people_vaults.sql` before using the new endpoints. These base routes do not implement account event persistence or grant members access.

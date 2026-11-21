@@ -14,6 +14,7 @@ import {
 } from "./domain.js";
 import type { Store } from "./store.js";
 import type { Auth } from "./auth.js";
+import { personInput, vaultInput, memberInput } from "./directory.js";
 export async function buildApp(options: {
   store: Store;
   auth: Auth;
@@ -124,5 +125,53 @@ export async function buildApp(options: {
     const u = await identity(req.headers.authorization);
     return { balances: balances(await options.store.listFor(u), u) };
   });
+  app.get("/v1/people", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return { people: await options.store.directory.listPeople(user) };
+  });
+  app.post("/v1/people", async (req, reply) => {
+    const user = await identity(req.headers.authorization);
+    return reply.code(201).send({
+      person: await options.store.directory.createPerson(
+        user,
+        personInput.parse(req.body),
+      ),
+    });
+  });
+  app.get("/v1/vaults", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return { vaults: await options.store.directory.listVaults(user) };
+  });
+  app.post("/v1/vaults", async (req, reply) => {
+    const user = await identity(req.headers.authorization);
+    return reply
+      .code(201)
+      .send(
+        await options.store.directory.createVault(
+          user,
+          vaultInput.parse(req.body),
+        ),
+      );
+  });
+  app.get<{ Params: { id: string } }>("/v1/vaults/:id", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return options.store.directory.vault(
+      user,
+      z.string().uuid().parse(req.params.id),
+    );
+  });
+  for (const add of [true, false])
+    app.post<{ Params: { id: string } }>(
+      `/v1/vaults/:id/members${add ? "" : "/remove"}`,
+      async (req) => {
+        const user = await identity(req.headers.authorization);
+        return options.store.directory.member(
+          user,
+          z.string().uuid().parse(req.params.id),
+          memberInput.parse(req.body).personId,
+          add,
+        );
+      },
+    );
   return app;
 }
