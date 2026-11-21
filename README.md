@@ -66,3 +66,5 @@ The durable store uses typed columns, indexed scoped authorization queries, and 
 See [pilot architecture and ownership](docs/PILOT.md) for deployment and next steps.
 
 For an existing Ubuntu EC2 instance, see [EC2 release deployment](docs/DEPLOY_EC2.md). Build the release locally; the server only installs production dependencies.
+
+For development, follow the [issue-to-PR contributor workflow](docs/CONTRIBUTING.md) and [engineering standards](AGENTS.md). Sol implements; Astra independently reviews the latest commit before merge. This process and backend deployments are currently manual.
