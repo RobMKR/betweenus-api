@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
+import { ZodError } from "zod";
 import { buildApp } from "../src/app.js";
 import { demoAuth } from "../src/auth.js";
 import { createDebt } from "../src/domain.js";
 import {
   MemoryStore,
   PostgresStore,
+  type Store,
   type SqlClient,
   type SqlPool,
 } from "../src/store.js";
@@ -419,3 +421,152 @@ test(
     }
   },
 );
+
+async function identifierAndTextCases(store: Store) {
+  const directory = store.directory;
+  const person = await directory.createPerson(owner, {
+    name: "Case test",
+    source: "custom",
+  });
+  const upper = person.id.toUpperCase();
+  const created = await directory.createVault(owner, {
+    title: "Case vault",
+    kind: "temporary",
+    memberIds: [upper],
+  });
+  assert.deepEqual(created.vault.memberIds, [person.id]);
+  const uppercaseVault = created.vault.id.toUpperCase();
+  assert.equal(
+    (await directory.vault(owner, uppercaseVault)).vault.id,
+    created.vault.id,
+  );
+  assert.deepEqual(
+    await directory.member(owner, uppercaseVault, upper, true),
+    created,
+  );
+  const removed = await directory.member(owner, uppercaseVault, upper, false);
+  assert.deepEqual(removed.vault.memberIds, []);
+  assert.deepEqual(
+    await directory.member(owner, uppercaseVault, person.id, false),
+    removed,
+  );
+  const added = await directory.member(owner, uppercaseVault, upper, true);
+  assert.deepEqual(added.vault.memberIds, [person.id]);
+  assert.deepEqual(
+    await directory.member(owner, created.vault.id, person.id, true),
+    added,
+  );
+  assert.equal(added.history.length, created.history.length + 2);
+  const before = await directory.listVaults(owner);
+  await assert.rejects(
+    directory.createVault(owner, {
+      title: "Duplicate case",
+      kind: "temporary",
+      memberIds: [person.id, upper],
+    }),
+    (error) => error instanceof ZodError,
+  );
+  await assert.rejects(
+    directory.createPerson(owner, { name: "Invalid\0name", source: "custom" }),
+    (error) => error instanceof ZodError,
+  );
+  await assert.rejects(
+    directory.createVault(owner, {
+      title: "Invalid\0title",
+      kind: "temporary",
+      memberIds: [],
+    }),
+    (error) => error instanceof ZodError,
+  );
+  assert.deepEqual(await directory.listVaults(owner), before);
+  assert.equal(
+    (await directory.listPeople(owner)).filter((p) => p.name.includes("\0"))
+      .length,
+    0,
+  );
+}
+test("memory UUID case variants share one identity and NUL text never persists", async () =>
+  identifierAndTextCases(new MemoryStore()));
+test("SQL UUID case variants share one identity and NUL text rejects before storage", async () => {
+  const db = new PGlite();
+  const query: SqlClient["query"] = async (sql, values) => ({
+    rows: (await db.query(sql, values)).rows as never[],
+  });
+  const adapter: SqlPool = {
+    query,
+    connect: async () => ({ query, release() {} }),
+    end: () => db.close(),
+  };
+  const store = new PostgresStore(adapter);
+  try {
+    for (const file of ["001_initial.sql", "002_people_vaults.sql"])
+      await db.exec(
+        await readFile(
+          new URL(`../migrations/${file}`, import.meta.url),
+          "utf8",
+        ),
+      );
+    await identifierAndTextCases(store);
+  } finally {
+    await store.close();
+  }
+});
+test("API normalizes uppercase resource/member IDs, rejects case-equivalent duplicates and NUL with 400", async () => {
+  const { app, call } = await appFixture();
+  try {
+    const p = (
+      await call("POST", "/v1/people", { name: "Case", source: "custom" })
+    ).json().person;
+    const creation = await call("POST", "/v1/vaults", {
+      title: "Case",
+      kind: "temporary",
+      memberIds: [p.id.toUpperCase()],
+    });
+    assert.equal(creation.statusCode, 201);
+    const initial = creation.json();
+    assert.deepEqual(initial.vault.memberIds, [p.id]);
+    const path = `/v1/vaults/${initial.vault.id.toUpperCase()}`;
+    assert.equal((await call("GET", path)).statusCode, 200);
+    const repeated = await call("POST", path + "/members", {
+      personId: p.id.toUpperCase(),
+    });
+    assert.equal(repeated.statusCode, 200);
+    assert.deepEqual(repeated.json(), initial);
+    const removed = await call("POST", path + "/members/remove", {
+      personId: p.id.toUpperCase(),
+    });
+    assert.equal(removed.statusCode, 200);
+    assert.deepEqual(removed.json().vault.memberIds, []);
+    assert.equal(
+      (
+        await call("POST", "/v1/vaults", {
+          title: "Duplicates",
+          kind: "temporary",
+          memberIds: [p.id, p.id.toUpperCase()],
+        })
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await call("POST", "/v1/people", {
+          name: "NUL\0name",
+          source: "custom",
+        })
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await call("POST", "/v1/vaults", {
+          title: "NUL\0title",
+          kind: "temporary",
+          memberIds: [],
+        })
+      ).statusCode,
+      400,
+    );
+  } finally {
+    await app.close();
+  }
+});

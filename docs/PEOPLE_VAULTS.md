@@ -31,6 +31,8 @@ Vault has `id`, `title`, `kind`, `archived` (initially false), ordered `memberId
 
 Both mutations return the detail shape and are idempotent: retries do not change history or updatedAt when the requested membership already holds. Removing someone does not delete their saved Person or earlier history; re-adding appends them after existing members. History entries have `id`, `action` (`created`, `member_added`, `member_removed`), nullable `personId`, `actorId` and ISO `createdAt`. Mutation/history writes are one row-locked transaction.
 
+UUID resource/member inputs are case-insensitive and normalized to lowercase before lookup, comparison and duplicate detection. A member repeated with different UUID letter case is still a duplicate and returns 400. Name/title strings containing NUL are rejected with 400 before either memory or PostgreSQL writes.
+
 Missing or other-owner vault/person references return 404. Invalid UUIDs, duplicate member input, unknown fields and invalid values return 400. Missing/invalid/unverified auth returns 401. Errors retain `{error:{code,message}}`. The owner cannot grant access by adding another person's email. New person/vault creation is not automatically deduplicated on retries; clients should prevent double submission and reconcile lists after an uncertain response. Member changes are retry-safe.
 
 ## Persistence, compatibility and boundaries

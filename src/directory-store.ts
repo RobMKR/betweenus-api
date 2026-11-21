@@ -9,6 +9,8 @@ import type {
   VaultInput,
 } from "./directory.js";
 import type { SqlClient, SqlPool } from "./store.js";
+import { uuidInput } from "./validation.js";
+import { personInput, vaultInput } from "./directory.js";
 export interface DirectoryStore {
   listPeople(user: Identity): Promise<SavedPerson[]>;
   createPerson(user: Identity, input: PersonInput): Promise<SavedPerson>;
@@ -37,6 +39,7 @@ export class MemoryDirectory implements DirectoryStore {
     );
   }
   async createPerson(user: Identity, input: PersonInput) {
+    input = personInput.parse(input);
     const person: SavedPerson = {
       id: randomUUID(),
       name: input.name,
@@ -79,6 +82,7 @@ export class MemoryDirectory implements DirectoryStore {
     };
   }
   async createVault(user: Identity, input: VaultInput) {
+    input = vaultInput.parse(input);
     const members = input.memberIds.map((id) => this.person(user, id));
     const now = new Date().toISOString();
     const detail: VaultDetail = {
@@ -101,9 +105,12 @@ export class MemoryDirectory implements DirectoryStore {
     return structuredClone(detail);
   }
   async vault(user: Identity, id: string) {
+    id = uuidInput.parse(id);
     return structuredClone(this.owned(user, id));
   }
   async member(user: Identity, id: string, personId: string, add: boolean) {
+    id = uuidInput.parse(id);
+    personId = uuidInput.parse(personId);
     const detail = this.owned(user, id);
     const person = this.person(user, personId);
     const exists = detail.vault.memberIds.includes(personId);
@@ -140,6 +147,7 @@ export class PostgresDirectory implements DirectoryStore {
     ).rows;
   }
   async createPerson(user: Identity, input: PersonInput) {
+    input = personInput.parse(input);
     return (
       await this.pool.query<SavedPerson>(
         `INSERT INTO saved_people(id,owner_id,name,source,email,phone) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${personColumns}`,
@@ -192,6 +200,7 @@ export class PostgresDirectory implements DirectoryStore {
     return { vault, members, history };
   }
   async vault(user: Identity, id: string) {
+    id = uuidInput.parse(id);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -243,6 +252,7 @@ export class PostgresDirectory implements DirectoryStore {
     );
   }
   async createVault(user: Identity, input: VaultInput) {
+    input = vaultInput.parse(input);
     return this.transaction(async (client) => {
       const id = randomUUID();
       await client.query(
@@ -262,6 +272,8 @@ export class PostgresDirectory implements DirectoryStore {
     });
   }
   async member(user: Identity, id: string, personId: string, add: boolean) {
+    id = uuidInput.parse(id);
+    personId = uuidInput.parse(personId);
     return this.transaction(async (client) => {
       if (
         !(

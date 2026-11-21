@@ -15,6 +15,7 @@ import {
 import type { Store } from "./store.js";
 import type { Auth } from "./auth.js";
 import { personInput, vaultInput, memberInput } from "./directory.js";
+import { uuidInput } from "./validation.js";
 export async function buildApp(options: {
   store: Store;
   auth: Auth;
@@ -102,7 +103,7 @@ export async function buildApp(options: {
       `/v1/debts/:id/${action}`,
       async (req) => {
         const u = await identity(req.headers.authorization);
-        const id = z.string().uuid().parse(req.params.id);
+        const id = uuidInput.parse(req.params.id);
         const reason =
           action === "dispute"
             ? disputeInput.parse(req.body).reason
@@ -155,10 +156,7 @@ export async function buildApp(options: {
   });
   app.get<{ Params: { id: string } }>("/v1/vaults/:id", async (req) => {
     const user = await identity(req.headers.authorization);
-    return options.store.directory.vault(
-      user,
-      z.string().uuid().parse(req.params.id),
-    );
+    return options.store.directory.vault(user, uuidInput.parse(req.params.id));
   });
   for (const add of [true, false])
     app.post<{ Params: { id: string } }>(
@@ -167,7 +165,7 @@ export async function buildApp(options: {
         const user = await identity(req.headers.authorization);
         return options.store.directory.member(
           user,
-          z.string().uuid().parse(req.params.id),
+          uuidInput.parse(req.params.id),
           memberInput.parse(req.body).personId,
           add,
         );

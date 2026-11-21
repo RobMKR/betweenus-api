@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { email } from "./domain.js";
+import { uuidInput, textInput } from "./validation.js";
 export const personInput = z
   .object({
-    name: z.string().trim().min(1).max(100),
+    name: textInput(100),
     source: z.enum(["custom", "contact"]),
     email: email.optional(),
     phone: z
@@ -17,10 +18,10 @@ export const personInput = z
   .strict();
 export const vaultInput = z
   .object({
-    title: z.string().trim().min(1).max(100),
+    title: textInput(100),
     kind: z.enum(["temporary", "permanent"]),
     memberIds: z
-      .array(z.string().uuid())
+      .array(uuidInput)
       .max(100)
       .refine(
         (ids) => new Set(ids).size === ids.length,
@@ -28,7 +29,7 @@ export const vaultInput = z
       ),
   })
   .strict();
-export const memberInput = z.object({ personId: z.string().uuid() }).strict();
+export const memberInput = z.object({ personId: uuidInput }).strict();
 export type PersonInput = z.infer<typeof personInput>;
 export type VaultInput = z.infer<typeof vaultInput>;
 export type SavedPerson = {
