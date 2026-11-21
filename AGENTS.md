@@ -5,6 +5,7 @@ These instructions apply throughout this repository. Keep changes understandable
 ## Ownership and workflow
 
 - Start new development from a GitHub issue with a concrete problem, scope, acceptance criteria and validation plan. Link it in the PR. If scope changes materially, update the issue before expanding work.
+- For agent commit attribution use `Sol Agent <sol@betweenus.invalid>`; never guess GitHub noreply addresses or use an unrelated account identity. Commit attribution and authenticated GitHub App identity are separate.
 - Sol implements; Astra manages and independently reviews. Use an isolated branch and worktree from current `origin/main`; never include unrelated local commits or edit another agent's workspace. Do not push directly to `main`.
 - Keep commits and PRs focused. Submit the final diff, exact head SHA, tests run and remaining limitations for review. Do not claim that a check passed unless its result was observed.
 - Astra reviews the latest head independently using [.agents/skills/review-pr/SKILL.md](.agents/skills/review-pr/SKILL.md). An author cannot approve their own change. After a new commit, review its changes and rerun affected checks; prior approval is not evidence for the new head.
