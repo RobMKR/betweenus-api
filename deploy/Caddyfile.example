@@ -1,0 +1,4 @@
+# Replace with your chosen hostname after its DNS resolves to this EC2 instance.
+api.example.com {
+    reverse_proxy 127.0.0.1:3001
+}

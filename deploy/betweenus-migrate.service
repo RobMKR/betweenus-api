@@ -1,0 +1,20 @@
+[Unit]
+Description=BetweenUs explicit database migration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=betweenus
+Group=betweenus
+WorkingDirectory=/opt/betweenus/current
+EnvironmentFile=/etc/betweenus/api.env
+Environment=NODE_ENV=production DEMO_MODE=false
+ExecStart=/opt/betweenus/node/bin/node dist/migrate.js
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+MemoryMax=384M
+LogNamespace=betweenus

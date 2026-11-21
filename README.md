@@ -64,3 +64,5 @@ Tests cover authorization, untrusted identity headers, validation, response tran
 The durable store uses typed columns, indexed scoped authorization queries, and a row lock for the response transaction, which saves state and history atomically. It loads a user's records for totals and does not paginate yet; suitable for a small pilot, add pagination and database aggregation before higher volume. The in-process rate limit is 100 requests per IP per minute and resets on restart; configure a trusted ingress and shared limiting if scaling beyond one instance. Proxy trust is intentionally disabled by default. No payment handling, email invitation delivery, reminder jobs, dispute resolution, instalments, CSV export, or account deletion workflow is implemented.
 
 See [pilot architecture and ownership](docs/PILOT.md) for deployment and next steps.
+
+For an existing Ubuntu EC2 instance, see [EC2 release deployment](docs/DEPLOY_EC2.md). Build the release locally; the server only installs production dependencies.

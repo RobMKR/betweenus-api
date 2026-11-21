@@ -22,7 +22,15 @@ export async function buildApp(options: {
   logger?: boolean;
 }) {
   const app = Fastify({
-    logger: options.logger ?? false,
+    logger: options.logger
+      ? {
+          redact: [
+            "req.headers.authorization",
+            "req.headers.cookie",
+            'res.headers["set-cookie"]',
+          ],
+        }
+      : false,
     bodyLimit: 8192,
     requestTimeout: 10000,
   });
