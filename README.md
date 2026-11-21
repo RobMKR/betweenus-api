@@ -68,3 +68,5 @@ See [pilot architecture and ownership](docs/PILOT.md) for deployment and next st
 For an existing Ubuntu EC2 instance, see [EC2 release deployment](docs/DEPLOY_EC2.md). Build the release locally; the server only installs production dependencies.
 
 For development, follow the [issue-to-PR contributor workflow](docs/CONTRIBUTING.md) and [engineering standards](AGENTS.md). Sol implements; Astra independently reviews the latest commit before merge. This process and backend deployments are currently manual.
+
+The [manual session publishing bridge](docs/SESSION_BRIDGE.md) can post actual session-authored PRs and independent reviews under scoped GitHub Apps. It does no AI work, merges or deployments, and requires no AI API billing.

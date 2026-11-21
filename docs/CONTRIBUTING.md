@@ -1,6 +1,6 @@
 # Contributor workflow
 
-Read [AGENTS.md](../AGENTS.md) first. Sol implements and Astra independently reviews. This is a manual issue-to-PR process; no unattended dispatcher, GitHub App, OIDC deployment or automated agent approval is installed. Backend deployment remains a separate authorized manual operation. Future automation is tracked in [issue #2](https://github.com/RobMKR/betweenus-api/issues/2).
+Read [AGENTS.md](../AGENTS.md) first. Sol implements and Astra independently reviews. This is a manual issue-to-PR process; no unattended dispatcher, OIDC deployment or autonomous agent review is installed. The [manual session bridge](SESSION_BRIDGE.md) can publish already-written PR/review results under scoped Apps after owner setup; it does not perform AI work. Backend deployment remains a separate authorized manual operation. Future automation is tracked in [issue #2](https://github.com/RobMKR/betweenus-api/issues/2).
 
 1. Create or select an issue with a concrete problem, acceptance criteria and a risk-appropriate validation plan.
 2. Fetch current remote state and create an isolated branch/worktree. For example, from the repository:
