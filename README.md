@@ -2,6 +2,12 @@
 
 A small Fastify + TypeScript monolith for friends and family debt acknowledgements. The sibling `betweenus-mobile` repository contains the Expo client. This repository is independently buildable and deployable. Node 24 is required.
 
+## Development starts with the issue specification
+
+Each development issue is the canonical implementation specification: problem, desired behavior with examples, scope/non-goals, numbered acceptance criteria, relevant constraints/contracts/data and authorization changes, verification, and unresolved decisions. Use the [issue template](.github/ISSUE_TEMPLATE/work_item.md) and [contributor workflow](docs/CONTRIBUTING.md).
+
+Sol inspects the repository against that specification before implementing; clarify material blockers before dependent work, record assumptions, and update the issue before implementing material scope or acceptance changes. Keep detail proportional: a simple fix needs a concise problem, expected result, acceptance criterion and check, not a separate full specification document. The flow is issue/spec → isolated implementation branch → Astra independent review → required CI on the latest SHA → authorized merge. The PR maps changes and observed checks to the issue's acceptance criteria.
+
 ## Run the local pilot
 
 ```sh
