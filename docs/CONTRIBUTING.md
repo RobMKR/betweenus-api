@@ -28,7 +28,7 @@ npm run format:check
 
 `npm test` uses embedded PostgreSQL for SQL/migration behavior. The network PostgreSQL concurrency test requires `DATABASE_URL`; otherwise it explicitly skips. CI supplies PostgreSQL 17, runs `npm run migrate`, then the tests. Live Supabase Auth, TLS, email delivery and production deployment are separate evidence, not implied by this suite. Never point tests at a production database.
 
-For durable integration checks with an isolated test database, export its `DATABASE_URL` privately and run `npm run migrate` before `npm test`. `.env` is not loaded implicitly; [Connect Supabase](CONNECT_SUPABASE.md) documents explicit Node `--env-file` usage. Deployment scripts can be syntax-checked with `bash -n deploy/*.sh`; see [EC2 deployment](DEPLOY_EC2.md) before any authorized release.
+For durable integration checks with an isolated test database, export its `DATABASE_URL` privately and run `npm run migrate` before `npm test`. `.env` is not loaded implicitly; [Connect Supabase](CONNECT_SUPABASE.md) documents explicit Node `--env-file` usage. Deployment scripts can be syntax-checked with `for script in deploy/*.sh; do bash -n "$script" || exit; done`; see [EC2 deployment](DEPLOY_EC2.md) before any authorized release.
 
 For documentation-only changes, verify commands against `package.json`, paths/links against source, and format the changed files. The existing format script does not include every hidden template or `AGENTS.md`; check those explicitly with:
 
