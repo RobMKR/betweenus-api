@@ -12,6 +12,7 @@ import type { SqlClient, SqlPool } from "./store.js";
 import { uuidInput } from "./validation.js";
 import { personInput, vaultInput } from "./directory.js";
 export interface DirectoryStore {
+  archive(user: Identity, id: string, archived: boolean): Promise<VaultDetail>;
   listPeople(user: Identity): Promise<SavedPerson[]>;
   createPerson(user: Identity, input: PersonInput): Promise<SavedPerson>;
   listVaults(user: Identity): Promise<Vault[]>;
@@ -108,6 +109,22 @@ export class MemoryDirectory implements DirectoryStore {
     id = uuidInput.parse(id);
     return structuredClone(this.owned(user, id));
   }
+  async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
+    const detail = this.owned(user, id);
+    if (detail.vault.archived !== archived) {
+      const event = this.event(
+        user,
+        archived ? "archived" : "reactivated",
+        null,
+      );
+      detail.vault.archived = archived;
+      detail.vault.updatedAt = event.createdAt;
+      detail.history.push(event);
+    }
+    return structuredClone(detail);
+  }
+
   async member(user: Identity, id: string, personId: string, add: boolean) {
     id = uuidInput.parse(id);
     personId = uuidInput.parse(personId);
@@ -213,6 +230,32 @@ export class PostgresDirectory implements DirectoryStore {
     } finally {
       client.release();
     }
+  }
+  async archive(user: Identity, id: string, archived: boolean) {
+    id = uuidInput.parse(id);
+    return this.transaction(async (client) => {
+      const row = (
+        await client.query<{ archived: boolean }>(
+          "SELECT archived FROM vaults WHERE owner_id=$1 AND id=$2 FOR UPDATE",
+          [user.id, id],
+        )
+      ).rows[0];
+      if (!row) throw notFound();
+      if (row.archived !== archived) {
+        await client.query(
+          "UPDATE vaults SET archived=$3,updated_at=clock_timestamp() WHERE owner_id=$1 AND id=$2",
+          [user.id, id, archived],
+        );
+        await this.history(
+          client,
+          user,
+          id,
+          archived ? "archived" : "reactivated",
+          null,
+        );
+      }
+      return this.detail(client, user, id);
+    });
   }
   private async transaction<T>(fn: (client: SqlClient) => Promise<T>) {
     const client = await this.pool.connect();

@@ -80,3 +80,5 @@ For development, follow the [issue-to-PR contributor workflow](docs/CONTRIBUTING
 The [manual session publishing bridge](docs/SESSION_BRIDGE.md) can post actual session-authored PRs and independent reviews under scoped GitHub Apps. It does no AI work, merges or deployments, and requires no AI API billing.
 
 Account saved People and owner-private vault rosters are documented in [People and vault contracts](docs/PEOPLE_VAULTS.md). Apply migration `002_people_vaults.sql` before using the new endpoints. These base routes do not implement account event persistence or grant members access.
+
+[Account events and repayment history](docs/ACCOUNT_EVENTS.md) add owner-private equal/manual splits, idempotent payments/undo, archive/reactivate and separate vault balances. Apply migration `003_account_events.sql` before new code; these records never auto-create confirmed debts or grant roster members account access.

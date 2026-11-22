@@ -16,6 +16,7 @@ import type { Store } from "./store.js";
 import type { Auth } from "./auth.js";
 import { personInput, vaultInput, memberInput } from "./directory.js";
 import { uuidInput } from "./validation.js";
+import { eventInput, paymentInput, undoInput, archiveInput } from "./events.js";
 export async function buildApp(options: {
   store: Store;
   auth: Auth;
@@ -141,35 +142,123 @@ export async function buildApp(options: {
   });
   app.get("/v1/vaults", async (req) => {
     const user = await identity(req.headers.authorization);
-    return { vaults: await options.store.directory.listVaults(user) };
+    return {
+      vaults: await options.store.events.vaults(
+        user,
+        await options.store.directory.listVaults(user),
+      ),
+    };
   });
   app.post("/v1/vaults", async (req, reply) => {
     const user = await identity(req.headers.authorization);
     return reply
       .code(201)
       .send(
-        await options.store.directory.createVault(
+        await options.store.events.detail(
           user,
-          vaultInput.parse(req.body),
+          await options.store.directory.createVault(
+            user,
+            vaultInput.parse(req.body),
+          ),
         ),
       );
   });
   app.get<{ Params: { id: string } }>("/v1/vaults/:id", async (req) => {
     const user = await identity(req.headers.authorization);
-    return options.store.directory.vault(user, uuidInput.parse(req.params.id));
+    return options.store.events.detail(
+      user,
+      await options.store.directory.vault(user, uuidInput.parse(req.params.id)),
+    );
   });
   for (const add of [true, false])
     app.post<{ Params: { id: string } }>(
       `/v1/vaults/:id/members${add ? "" : "/remove"}`,
       async (req) => {
         const user = await identity(req.headers.authorization);
-        return options.store.directory.member(
+        return options.store.events.detail(
           user,
-          uuidInput.parse(req.params.id),
-          memberInput.parse(req.body).personId,
-          add,
+          await options.store.directory.member(
+            user,
+            uuidInput.parse(req.params.id),
+            memberInput.parse(req.body).personId,
+            add,
+          ),
         );
       },
     );
+  app.get("/v1/vault-balances", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return { balances: await options.store.events.balances(user) };
+  });
+  app.get<{ Params: { id: string } }>("/v1/vaults/:id/events", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return {
+      events: await options.store.events.list(
+        user,
+        uuidInput.parse(req.params.id),
+      ),
+    };
+  });
+  app.post<{ Params: { id: string } }>(
+    "/v1/vaults/:id/events",
+    { bodyLimit: 32768 },
+    async (req, reply) => {
+      const user = await identity(req.headers.authorization);
+      return reply.code(201).send({
+        event: await options.store.events.create(
+          user,
+          uuidInput.parse(req.params.id),
+          eventInput.parse(req.body),
+        ),
+      });
+    },
+  );
+  app.get<{ Params: { id: string } }>("/v1/events/:id", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return {
+      event: await options.store.events.get(
+        user,
+        uuidInput.parse(req.params.id),
+      ),
+    };
+  });
+  app.post<{ Params: { id: string } }>(
+    "/v1/events/:id/payments",
+    async (req) => {
+      const user = await identity(req.headers.authorization);
+      return {
+        event: await options.store.events.pay(
+          user,
+          uuidInput.parse(req.params.id),
+          paymentInput.parse(req.body),
+        ),
+      };
+    },
+  );
+  app.post<{ Params: { id: string; paymentId: string } }>(
+    "/v1/events/:id/payments/:paymentId/undo",
+    async (req) => {
+      const user = await identity(req.headers.authorization);
+      return {
+        event: await options.store.events.undo(
+          user,
+          uuidInput.parse(req.params.id),
+          uuidInput.parse(req.params.paymentId),
+          undoInput.parse(req.body),
+        ),
+      };
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/v1/vaults/:id/archive",
+    async (req) => {
+      const user = await identity(req.headers.authorization);
+      return options.store.events.archive(
+        user,
+        uuidInput.parse(req.params.id),
+        archiveInput.parse(req.body).archived,
+      );
+    },
+  );
   return app;
 }

@@ -1,5 +1,10 @@
 import pg from "pg";
 import {
+  MemoryEvents,
+  PostgresEvents,
+  type EventStore,
+} from "./event-store.js";
+import {
   MemoryDirectory,
   PostgresDirectory,
   type DirectoryStore,
@@ -7,6 +12,7 @@ import {
 import { transition, visible, type Debt, type Identity } from "./domain.js";
 export interface Store {
   readonly directory: DirectoryStore;
+  readonly events: EventStore;
   listFor(user: Identity): Promise<Debt[]>;
   create(debt: Debt): Promise<Debt>;
   respond(
@@ -19,6 +25,7 @@ export interface Store {
 }
 export class MemoryStore implements Store {
   readonly directory = new MemoryDirectory();
+  readonly events = new MemoryEvents(this.directory);
   private debts: Debt[] = [];
   async listFor(user: Identity) {
     return structuredClone(this.debts.filter((d) => visible(d, user)));
@@ -57,12 +64,14 @@ export interface SqlPool {
 export class PostgresStore implements Store {
   private pool: SqlPool;
   readonly directory: DirectoryStore;
+  readonly events: EventStore;
   constructor(url: string | SqlPool) {
     this.pool =
       typeof url === "string"
         ? new pg.Pool({ connectionString: url, max: 5 })
         : url;
     this.directory = new PostgresDirectory(this.pool);
+    this.events = new PostgresEvents(this.pool, this.directory);
   }
   async listFor(user: Identity) {
     const { rows } = await this.pool.query<Debt>(
