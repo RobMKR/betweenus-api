@@ -189,7 +189,7 @@ export class MemoryEvents extends Summaries implements EventStore {
 }
 const stamp = (column: string) =>
   `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
-const eventColumns = `id,vault_id AS "vaultId",title,to_char(event_date,'YYYY-MM-DD') AS date,currency,total_minor AS "totalMinor",payer_id AS "payerId",split_mode AS "splitMode",participants,${stamp("created_at")} AS "createdAt",${stamp("updated_at")} AS "updatedAt"`;
+const eventColumns = `id,vault_id AS "vaultId",title,to_char(event_date,'YYYY-MM-DD') AS date,currency,total_minor AS "totalMinor",payer_id AS "payerId",split_mode AS "splitMode",partial_payments AS "partialPayments",participants,${stamp("created_at")} AS "createdAt",${stamp("updated_at")} AS "updatedAt"`;
 const paymentColumns = `id,event_id AS "eventId",participant_id AS "participantId",amount_minor AS "amountMinor",reverses_id AS "reversesId",${stamp("created_at")} AS "createdAt"`;
 export class PostgresEvents extends Summaries implements EventStore {
   constructor(
@@ -357,7 +357,7 @@ export class PostgresEvents extends Summaries implements EventStore {
         ).rows;
         const event = makeEvent(vaultId, input, people);
         await client.query(
-          "INSERT INTO vault_events(id,owner_id,vault_id,title,event_date,currency,total_minor,payer_id,split_mode,participants,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+          "INSERT INTO vault_events(id,owner_id,vault_id,title,event_date,currency,total_minor,payer_id,split_mode,participants,created_at,updated_at,partial_payments) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
           [
             event.id,
             user.id,
@@ -371,6 +371,7 @@ export class PostgresEvents extends Summaries implements EventStore {
             JSON.stringify(event.participants),
             event.createdAt,
             event.updatedAt,
+            event.partialPayments,
           ],
         );
         return event;

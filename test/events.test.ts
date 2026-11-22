@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { ZodError } from "zod";
@@ -173,6 +173,7 @@ async function lifecycle(store: Store) {
   const id = vault.vault.id;
   const intent = base(["self", a.id, b.id], { totalMinor: 100 });
   const created = await store.events.create(owner, id, intent);
+  assert.equal(created.partialPayments, true);
   assert.equal(created.balance.receivableMinor, 66);
   assert.notEqual(
     created.participants[1].participantId,
@@ -328,6 +329,110 @@ test("memory event lifecycle preserves snapshots, retries, partial/full repaymen
   const store = new MemoryStore();
   await lifecycle(store);
 });
+async function paymentPolicy(store: Store, user = owner) {
+  const person = await store.directory.createPerson(user, {
+    name: "Friend",
+    source: "custom",
+  });
+  const { vault } = await store.directory.createVault(user, {
+    title: "Partial payment policy",
+    kind: "temporary",
+    memberIds: [],
+  });
+  const explicit = await store.events.create(
+    user,
+    vault.id,
+    base([person.id], { totalMinor: 100, partialPayments: true }),
+  );
+  const partial = {
+    clientRequestId: randomUUID(),
+    participantId: person.id,
+    amountMinor: 40,
+  };
+  const partPaid = await store.events.pay(user, explicit.id, partial);
+  assert.equal(partPaid.partialPayments, true);
+  assert.equal(partPaid.participants[0].remainingMinor, 60);
+
+  const intent = base(["self", person.id], {
+    totalMinor: 100,
+    splitMode: "manual",
+    allocations: [
+      { participantId: person.id, shareMinor: 60 },
+      { participantId: "self", shareMinor: 40 },
+    ],
+    partialPayments: false,
+  });
+  const event = await store.events.create(user, vault.id, intent);
+  assert.equal(event.partialPayments, false);
+  assert.equal((await store.events.get(user, event.id)).partialPayments, false);
+  assert.equal(
+    (await store.events.list(user, vault.id)).find(({ id }) => id === event.id)
+      ?.partialPayments,
+    false,
+  );
+  await assert.rejects(
+    store.events.create(user, vault.id, { ...intent, partialPayments: true }),
+    { code: "IDEMPOTENCY_CONFLICT" },
+  );
+  const payment = { ...partial, clientRequestId: randomUUID() };
+  await assert.rejects(store.events.pay(user, event.id, payment), {
+    status: 409,
+    code: "FULL_PAYMENT_REQUIRED",
+  });
+  await assert.rejects(
+    store.events.pay(user, event.id, { ...payment, amountMinor: 61 }),
+    { status: 409, code: "OVERPAYMENT" },
+  );
+  await assert.rejects(
+    store.events.pay(user, event.id, { ...payment, participantId: "self" }),
+    { status: 409, code: "PAYER_PAYMENT" },
+  );
+  assert.deepEqual(await store.events.get(user, event.id), event);
+  const full = { ...payment, amountMinor: 60 };
+  const paid = await store.events.pay(user, event.id, full);
+  assert.equal(paid.participants[1].remainingMinor, 0);
+  assert.deepEqual(await store.events.pay(user, event.id, full), paid);
+  const restored = await store.events.undo(
+    user,
+    event.id,
+    paid.payments[0].id,
+    {
+      clientRequestId: randomUUID(),
+    },
+  );
+  assert.equal(restored.participants[1].remainingMinor, 60);
+  assert.equal(restored.payments[1].reversesId, paid.payments[0].id);
+  assert.deepEqual(await store.events.pay(user, event.id, full), restored);
+  assert.deepEqual(await store.events.create(user, vault.id, intent), restored);
+  return { event, full, restored };
+}
+async function concurrentFullPayments(store: Store, user = owner) {
+  const { event, full } = await paymentPolicy(store, user);
+  const a = { ...full, clientRequestId: randomUUID() };
+  const b = { ...full, clientRequestId: randomUUID() };
+  const results = await Promise.allSettled([
+    store.events.pay(user, event.id, a),
+    store.events.pay(user, event.id, a),
+    store.events.pay(user, event.id, b),
+    store.events.pay(user, event.id, b),
+  ]);
+  const current = await store.events.get(user, event.id);
+  assert.equal(current.payments.length, 3);
+  assert.equal(current.participants[1].remainingMinor, 0);
+  const successes = results.filter((result) => result.status === "fulfilled");
+  assert.deepEqual(
+    successes.map((result) => result.value),
+    [current, current],
+  );
+  const failures = results.filter((result) => result.status === "rejected");
+  assert.deepEqual(
+    failures.map((result) => result.reason.code),
+    ["OVERPAYMENT", "OVERPAYMENT"],
+  );
+}
+test("memory full-share policy validates remaining amounts and serializes concurrent payments", async () => {
+  await concurrentFullPayments(new MemoryStore());
+});
 test("simultaneous memory retries serialize and overpayment does not reserve a failed intent", async () => {
   const store = new MemoryStore();
   const a = await store.directory.createPerson(owner, {
@@ -407,20 +512,29 @@ test("event routes enforce auth/validation, maximum manual payload, extended vau
     const manual = base(
       persons.map((p) => p.id),
       {
-        totalMinor: 100,
+        totalMinor: 101,
         splitMode: "manual",
-        allocations: persons.map((p) => ({
+        partialPayments: false,
+        allocations: persons.map((p, index) => ({
           participantId: p.id,
-          shareMinor: 1,
+          shareMinor: index === 0 ? 2 : 1,
         })),
       },
     );
     assert.ok(JSON.stringify(manual).length > 8192);
+    for (const partialPayments of ["false", 0, null]) {
+      const invalid = await call("POST", `/v1/vaults/${id}/events`, {
+        ...manual,
+        partialPayments,
+      });
+      assert.equal(invalid.statusCode, 400);
+    }
     const saved = await call("POST", `/v1/vaults/${id}/events`, manual);
     assert.equal(saved.statusCode, 201);
     const event = saved.json().event;
+    assert.equal(event.partialPayments, false);
     assert.equal(event.participants.length, 100);
-    assert.equal(event.balance.netMinor, 100);
+    assert.equal(event.balance.netMinor, 101);
     assert.equal(
       (await call("GET", `/v1/events/${event.id}`, undefined, "demo-borrower"))
         .statusCode,
@@ -428,7 +542,7 @@ test("event routes enforce auth/validation, maximum manual payload, extended vau
     );
     assert.equal(
       (await call("GET", "/v1/vault-balances")).json().balances[0].netMinor,
-      100,
+      101,
     );
     assert.equal(
       (await call("GET", "/v1/balances")).json().balances[0].netMinor,
@@ -458,8 +572,16 @@ test("event routes enforce auth/validation, maximum manual payload, extended vau
       participantId: persons[0].id,
       amountMinor: 1,
     };
-    const paid = await call("POST", `/v1/events/${event.id}/payments`, payment);
+    const paymentRoute = `/v1/events/${event.id}/payments`;
+    const rejected = await call("POST", paymentRoute, payment);
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(rejected.json().error.code, "FULL_PAYMENT_REQUIRED");
+    const paid = await call("POST", paymentRoute, {
+      ...payment,
+      amountMinor: 2,
+    });
     assert.equal(paid.statusCode, 200);
+    assert.equal(paid.json().event.partialPayments, false);
     assert.equal(paid.json().event.balance.netMinor, 99);
     const undone = await call(
       "POST",
@@ -467,12 +589,13 @@ test("event routes enforce auth/validation, maximum manual payload, extended vau
       { clientRequestId: randomUUID() },
     );
     assert.equal(undone.statusCode, 200);
-    assert.equal(undone.json().event.balance.netMinor, 100);
+    assert.equal(undone.json().event.partialPayments, false);
+    assert.equal(undone.json().event.balance.netMinor, 101);
     const archived = await call("POST", `/v1/vaults/${id}/archive`, {
       archived: true,
     });
     assert.equal(archived.json().vault.eventCount, 1);
-    assert.equal(archived.json().vault.balances[0].netMinor, 100);
+    assert.equal(archived.json().vault.balances[0].netMinor, 101);
     assert.equal(
       (await call("GET", `/v1/vaults/${id}`)).json().vault.eventCount,
       1,
@@ -524,12 +647,19 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
     );
     await store.respond(legacy.id, other, "accepted");
     const debtBefore = await store.listFor(owner);
-    const priorVault = await store.directory.createVault(owner, {
+    const legacyOwner = {
+      id: "legacy-owner",
+      email: "legacy-owner@example.com",
+    };
+    const priorVault = await store.directory.createVault(legacyOwner, {
       title: "Existing vault",
       kind: "permanent",
       memberIds: [],
     });
-    const before = await store.directory.vault(owner, priorVault.vault.id);
+    const before = await store.directory.vault(
+      legacyOwner,
+      priorVault.vault.id,
+    );
     await db.exec(
       "CREATE ROLE anon; CREATE ROLE authenticated; ALTER DEFAULT PRIVILEGES GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO anon,authenticated; ALTER DEFAULT PRIVILEGES GRANT USAGE,SELECT ON SEQUENCES TO anon,authenticated;",
     );
@@ -539,11 +669,132 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
         "utf8",
       ),
     );
+    const person = await store.directory.createPerson(legacyOwner, {
+      name: "Existing participant",
+      source: "custom",
+    });
+    const legacyEvent = {
+      clientRequestId: randomUUID(),
+      title: "Existing event",
+      date: "2026-11-21",
+      currency: "AED" as const,
+      totalMinor: 100,
+      participantIds: ["self", person.id],
+      payerId: "self",
+      splitMode: "manual" as const,
+      allocations: [
+        { participantId: "self", shareMinor: 40 },
+        { participantId: person.id, shareMinor: 60 },
+      ],
+    };
+    const legacyPay = {
+      clientRequestId: randomUUID(),
+      participantId: person.id,
+      amountMinor: 10,
+    };
+    const legacyEventId = randomUUID();
+    const legacyPaymentId = randomUUID();
+    const timestamp = "2026-11-21T12:00:00.000Z";
+    await db.query(
+      "INSERT INTO vault_events(id,owner_id,vault_id,title,event_date,currency,total_minor,payer_id,split_mode,participants,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)",
+      [
+        legacyEventId,
+        legacyOwner.id,
+        priorVault.vault.id,
+        legacyEvent.title,
+        legacyEvent.date,
+        legacyEvent.currency,
+        legacyEvent.totalMinor,
+        legacyEvent.payerId,
+        legacyEvent.splitMode,
+        JSON.stringify([
+          { participantId: "self", name: "Me", isSelf: true, shareMinor: 40 },
+          {
+            participantId: person.id,
+            name: person.name,
+            isSelf: false,
+            shareMinor: 60,
+          },
+        ]),
+        timestamp,
+      ],
+    );
+    await db.query(
+      "INSERT INTO event_payments(id,owner_id,event_id,participant_id,amount_minor,created_at) VALUES($1,$2,$3,$4,$5,$6)",
+      [
+        legacyPaymentId,
+        legacyOwner.id,
+        legacyEventId,
+        person.id,
+        legacyPay.amountMinor,
+        timestamp,
+      ],
+    );
+    // These objects use the serialized field order and normalized allocations of migration 003-era code.
+    for (const { action, resource, input } of [
+      { action: "create", resource: priorVault.vault.id, input: legacyEvent },
+      { action: "pay", resource: legacyEventId, input: legacyPay },
+    ]) {
+      const fingerprint = createHash("sha256")
+        .update(JSON.stringify({ action, resource, input }))
+        .digest("hex");
+      await db.query(
+        "INSERT INTO event_requests(owner_id,request_id,fingerprint,action,resource,event_id) VALUES($1,$2,$3,$4,$5,$6)",
+        [
+          legacyOwner.id,
+          input.clientRequestId,
+          fingerprint,
+          action,
+          resource,
+          legacyEventId,
+        ],
+      );
+    }
+    await db.exec(
+      await readFile(
+        new URL(
+          "../migrations/004_event_partial_payments.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const migratedEvent = await store.events.create(
+      legacyOwner,
+      priorVault.vault.id,
+      {
+        ...legacyEvent,
+        allocations: [...legacyEvent.allocations].reverse(),
+      },
+    );
+    assert.equal(migratedEvent.id, legacyEventId);
+    assert.equal(migratedEvent.partialPayments, true);
+    assert.equal(migratedEvent.balance.receivableMinor, 50);
+    assert.deepEqual(migratedEvent.payments, [
+      {
+        id: legacyPaymentId,
+        participantId: person.id,
+        amountMinor: 10,
+        createdAt: timestamp,
+      },
+    ]);
     assert.deepEqual(
-      await store.directory.vault(owner, priorVault.vault.id),
+      await store.events.pay(legacyOwner, legacyEventId, legacyPay),
+      migratedEvent,
+    );
+    await assert.rejects(
+      store.events.create(legacyOwner, priorVault.vault.id, {
+        ...legacyEvent,
+        partialPayments: true,
+      }),
+      { code: "IDEMPOTENCY_CONFLICT" },
+    );
+    assert.deepEqual(
+      await store.directory.vault(legacyOwner, priorVault.vault.id),
       before,
     );
     const result = await lifecycle(store);
+    await paymentPolicy(store);
     assert.deepEqual(await store.listFor(owner), debtBefore);
     for (const role of ["anon", "authenticated"])
       for (const table of [
@@ -689,6 +940,7 @@ test(
         overpay.filter((result) => result.status === "rejected").length,
         1,
       );
+      await concurrentFullPayments(store, user);
     } finally {
       const client = new pg.default.Client({ connectionString: url });
       await client.connect();
@@ -1000,6 +1252,7 @@ test("SQL event routes preserve UUID case identity and semantic manual retry equ
       "001_initial.sql",
       "002_people_vaults.sql",
       "003_account_events.sql",
+      "004_event_partial_payments.sql",
     ])
       await db.exec(
         await readFile(

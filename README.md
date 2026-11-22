@@ -81,4 +81,4 @@ The [manual session publishing bridge](docs/SESSION_BRIDGE.md) can post actual s
 
 Account saved People and owner-private vault rosters are documented in [People and vault contracts](docs/PEOPLE_VAULTS.md). Apply migration `002_people_vaults.sql` before using the new endpoints. These base routes do not implement account event persistence or grant members access.
 
-[Account events and repayment history](docs/ACCOUNT_EVENTS.md) add owner-private equal/manual splits, idempotent payments/undo, archive/reactivate and separate vault balances. Apply migration `003_account_events.sql` before new code; these records never auto-create confirmed debts or grant roster members account access.
+[Account events and repayment history](docs/ACCOUNT_EVENTS.md) support owner-private equal/manual splits, an event-level partial payment setting, idempotent payments/undo, archive/reactivate and separate vault balances. Apply migrations through `004_event_partial_payments.sql` before running the updated API.
