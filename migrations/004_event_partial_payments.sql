@@ -1,0 +1,2 @@
+ALTER TABLE vault_events
+ ADD COLUMN partial_payments BOOLEAN NOT NULL DEFAULT TRUE;

@@ -36,6 +36,8 @@ export const eventInput = z
       )
       .max(100)
       .optional(),
+    // Keep omission in the parsed intent so old create fingerprints match.
+    partialPayments: z.boolean().optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -119,6 +121,7 @@ export type StoredEvent = {
   totalMinor: number;
   payerId: string;
   splitMode: "equal" | "manual";
+  partialPayments: boolean;
   participants: Participant[];
   payments: EventPayment[];
   createdAt: string;
@@ -219,6 +222,7 @@ export function makeEvent(
     totalMinor: input.totalMinor,
     payerId: input.payerId,
     splitMode: input.splitMode,
+    partialPayments: input.partialPayments ?? true,
     participants,
     payments: [],
     createdAt: now,
@@ -244,6 +248,15 @@ export function recordPayment(
       409,
       "OVERPAYMENT",
       "Payment exceeds the remaining amount.",
+    );
+  if (
+    !event.partialPayments &&
+    input.amountMinor !== participant.remainingMinor
+  )
+    throw new ApiError(
+      409,
+      "FULL_PAYMENT_REQUIRED",
+      "Payment must equal the remaining amount.",
     );
   const payment: EventPayment = {
     id: randomUUID(),
