@@ -17,6 +17,11 @@ import type { Auth } from "./auth.js";
 import { personInput, vaultInput, memberInput } from "./directory.js";
 import { uuidInput } from "./validation.js";
 import { eventInput, paymentInput, undoInput, archiveInput } from "./events.js";
+import {
+  currencySettingsInput,
+  valueBalances,
+  vaultCurrencyInput,
+} from "./currency.js";
 export async function buildApp(options: {
   store: Store;
   auth: Auth;
@@ -42,7 +47,7 @@ export async function buildApp(options: {
       "http://localhost:5173",
       "http://localhost:8081",
     ],
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PATCH", "PUT"],
     allowedHeaders: ["Authorization", "Content-Type"],
   });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
@@ -125,7 +130,25 @@ export async function buildApp(options: {
     );
   app.get("/v1/balances", async (req) => {
     const u = await identity(req.headers.authorization);
-    return { balances: balances(await options.store.listFor(u), u) };
+    const original = balances(await options.store.listFor(u), u);
+    return {
+      balances: original,
+      valuation: valueBalances(
+        original,
+        await options.store.currencySettings.get(u),
+      ),
+    };
+  });
+  app.get("/v1/currency-settings", async (req) => {
+    const user = await identity(req.headers.authorization);
+    return options.store.currencySettings.get(user);
+  });
+  app.put("/v1/currency-settings", { bodyLimit: 131072 }, async (req) => {
+    const user = await identity(req.headers.authorization);
+    return options.store.currencySettings.put(
+      user,
+      currencySettingsInput.parse(req.body),
+    );
   });
   app.get("/v1/people", async (req) => {
     const user = await identity(req.headers.authorization);
@@ -170,6 +193,17 @@ export async function buildApp(options: {
       await options.store.directory.vault(user, uuidInput.parse(req.params.id)),
     );
   });
+  app.patch<{ Params: { id: string } }>(
+    "/v1/vaults/:id/currency",
+    async (req) => {
+      const user = await identity(req.headers.authorization);
+      return options.store.events.changeCurrency(
+        user,
+        uuidInput.parse(req.params.id),
+        vaultCurrencyInput.parse(req.body).currency,
+      );
+    },
+  );
   for (const add of [true, false])
     app.post<{ Params: { id: string } }>(
       `/v1/vaults/:id/members${add ? "" : "/remove"}`,
@@ -188,7 +222,14 @@ export async function buildApp(options: {
     );
   app.get("/v1/vault-balances", async (req) => {
     const user = await identity(req.headers.authorization);
-    return { balances: await options.store.events.balances(user) };
+    const original = await options.store.events.balances(user);
+    return {
+      balances: original,
+      valuation: valueBalances(
+        original,
+        await options.store.currencySettings.get(user),
+      ),
+    };
   });
   app.get<{ Params: { id: string } }>("/v1/vaults/:id/events", async (req) => {
     const user = await identity(req.headers.authorization);

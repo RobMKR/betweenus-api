@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { ApiError, type Identity } from "./domain.js";
 import { uuidInput } from "./validation.js";
-import type { DirectoryStore } from "./directory-store.js";
+import type { MemoryDirectory, PostgresDirectory } from "./directory-store.js";
+import { currencyInput, type Currency } from "./currency.js";
 import type { Vault, VaultDetail } from "./directory.js";
 import type { SqlClient, SqlPool } from "./store.js";
 import {
@@ -15,6 +16,7 @@ import {
   recordPayment,
   reversePayment,
   requireActive,
+  requireVaultCurrency,
   missingEvent,
   type EventInput,
   type PaymentInput,
@@ -45,6 +47,11 @@ export interface EventStore {
     user: Identity,
     id: string,
     archived: boolean,
+  ): Promise<VaultSummaryDetail>;
+  changeCurrency(
+    user: Identity,
+    id: string,
+    currency: Currency,
   ): Promise<VaultSummaryDetail>;
   vaults(user: Identity, vaults: Vault[]): Promise<VaultSummary[]>;
   detail(user: Identity, detail: VaultDetail): Promise<VaultSummaryDetail>;
@@ -83,7 +90,7 @@ export class MemoryEvents extends Summaries implements EventStore {
   private events = new Map<string, { ownerId: string; event: StoredEvent }>();
   private requests = new Map<string, { hash: string; eventId: string }>();
   private queue: Promise<void> = Promise.resolve();
-  constructor(private directory: DirectoryStore) {
+  constructor(private directory: MemoryDirectory) {
     super();
   }
   private serial<T>(fn: () => Promise<T>) {
@@ -143,6 +150,7 @@ export class MemoryEvents extends Summaries implements EventStore {
       async () => {
         const detail = await this.directory.vault(user, vaultId);
         requireActive(detail.vault.archived);
+        requireVaultCurrency(detail.vault.currency, input.currency);
         return makeEvent(vaultId, input, await this.directory.listPeople(user));
       },
     );
@@ -180,6 +188,20 @@ export class MemoryEvents extends Summaries implements EventStore {
       },
     );
   }
+  async changeCurrency(user: Identity, id: string, raw: Currency) {
+    id = uuidInput.parse(id);
+    const currency = currencyInput.parse(raw);
+    return this.serial(async () => {
+      const events = await this.list(user, id);
+      const detail = this.directory.changeCurrency(
+        user,
+        id,
+        currency,
+        events.length > 0,
+      );
+      return { ...detail, vault: summarize(detail.vault, events) };
+    });
+  }
   async archive(user: Identity, id: string, archived: boolean) {
     id = uuidInput.parse(id);
     return this.serial(async () =>
@@ -194,7 +216,7 @@ const paymentColumns = `id,event_id AS "eventId",participant_id AS "participantI
 export class PostgresEvents extends Summaries implements EventStore {
   constructor(
     private pool: SqlPool,
-    private directory: DirectoryStore,
+    private directory: PostgresDirectory,
   ) {
     super();
   }
@@ -224,8 +246,8 @@ export class PostgresEvents extends Summaries implements EventStore {
     lock = false,
   ) {
     const row = (
-      await client.query<{ archived: boolean }>(
-        `SELECT archived FROM vaults WHERE owner_id=$1 AND id=$2${lock ? " FOR UPDATE" : ""}`,
+      await client.query<{ archived: boolean; currency: Currency }>(
+        `SELECT archived,currency FROM vaults WHERE owner_id=$1 AND id=$2${lock ? " FOR UPDATE" : ""}`,
         [user.id, id],
       )
     ).rows[0];
@@ -347,7 +369,9 @@ export class PostgresEvents extends Summaries implements EventStore {
       "create",
       vaultId,
       async (client) => {
-        requireActive((await this.vault(client, user, vaultId, true)).archived);
+        const vault = await this.vault(client, user, vaultId, true);
+        requireActive(vault.archived);
+        requireVaultCurrency(vault.currency, input.currency);
         const ids = input.participantIds.filter((id) => id !== "self");
         const people = (
           await client.query<{ id: string; name: string }>(
@@ -432,6 +456,12 @@ export class PostgresEvents extends Summaries implements EventStore {
         await this.append(client, user, updated);
         return updated;
       },
+    );
+  }
+  async changeCurrency(user: Identity, id: string, currency: Currency) {
+    return this.detail(
+      user,
+      await this.directory.changeCurrency(user, id, currency),
     );
   }
   async archive(user: Identity, id: string, archived: boolean) {

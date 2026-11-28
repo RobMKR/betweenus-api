@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { email } from "./domain.js";
 import { uuidInput, textInput } from "./validation.js";
+import { currencyInput, type Currency } from "./currency.js";
 export const personInput = z
   .object({
     name: textInput(100),
@@ -20,6 +21,7 @@ export const vaultInput = z
   .object({
     title: textInput(100),
     kind: z.enum(["temporary", "permanent"]),
+    currency: currencyInput.optional(),
     memberIds: z
       .array(uuidInput)
       .max(100)
@@ -44,6 +46,7 @@ export type Vault = {
   id: string;
   title: string;
   kind: "temporary" | "permanent";
+  currency: Currency;
   archived: boolean;
   memberIds: string[];
   createdAt: string;
@@ -52,7 +55,12 @@ export type Vault = {
 export type VaultHistory = {
   id: string;
   action:
-    "created" | "member_added" | "member_removed" | "archived" | "reactivated";
+    | "created"
+    | "member_added"
+    | "member_removed"
+    | "archived"
+    | "reactivated"
+    | "currency_changed";
   personId: string | null;
   actorId: string;
   createdAt: string;

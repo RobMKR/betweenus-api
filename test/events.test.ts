@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import catalog from "../src/currency-catalog.json" with { type: "json" };
 import { ZodError } from "zod";
 import { buildApp } from "../src/app.js";
 import { demoAuth } from "../src/auth.js";
@@ -114,7 +115,7 @@ test("strict manual allocations preserve explicit integer shares and reject malf
     { totalMinor: 0 },
     { totalMinor: 1.5 },
     { totalMinor: 1_000_000_001 },
-    { currency: "USD" },
+    { currency: "XXX" },
     { date: "2026-02-30" },
     { date: "0000-01-01" },
     { date: "2026-11-21T00:00:00Z" },
@@ -651,15 +652,39 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
       id: "legacy-owner",
       email: "legacy-owner@example.com",
     };
-    const priorVault = await store.directory.createVault(legacyOwner, {
-      title: "Existing vault",
-      kind: "permanent",
-      memberIds: [],
-    });
-    const before = await store.directory.vault(
-      legacyOwner,
-      priorVault.vault.id,
+    const priorVaultId = randomUUID();
+    const priorVaultHistoryId = randomUUID();
+    const priorVaultTimestamp = "2026-11-20T13:00:00.000Z";
+    await db.query(
+      "INSERT INTO vaults(id,owner_id,title,kind,created_at,updated_at) VALUES($1,$2,'Existing vault','permanent',$3,$3)",
+      [priorVaultId, legacyOwner.id, priorVaultTimestamp],
     );
+    await db.query(
+      "INSERT INTO vault_history(id,owner_id,vault_id,action,created_at) VALUES($1,$2,$3,'created',$4)",
+      [priorVaultHistoryId, legacyOwner.id, priorVaultId, priorVaultTimestamp],
+    );
+    const before = {
+      vault: {
+        id: priorVaultId,
+        archived: false,
+        currency: "AED",
+        memberIds: [],
+        title: "Existing vault",
+        kind: "permanent",
+        createdAt: priorVaultTimestamp,
+        updatedAt: priorVaultTimestamp,
+      },
+      members: [],
+      history: [
+        {
+          id: priorVaultHistoryId,
+          action: "created",
+          personId: null,
+          actorId: legacyOwner.id,
+          createdAt: priorVaultTimestamp,
+        },
+      ],
+    };
     await db.exec(
       "CREATE ROLE anon; CREATE ROLE authenticated; ALTER DEFAULT PRIVILEGES GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO anon,authenticated; ALTER DEFAULT PRIVILEGES GRANT USAGE,SELECT ON SEQUENCES TO anon,authenticated;",
     );
@@ -700,7 +725,7 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
       [
         legacyEventId,
         legacyOwner.id,
-        priorVault.vault.id,
+        priorVaultId,
         legacyEvent.title,
         legacyEvent.date,
         legacyEvent.currency,
@@ -732,7 +757,7 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
     );
     // These objects use the serialized field order and normalized allocations of migration 003-era code.
     for (const { action, resource, input } of [
-      { action: "create", resource: priorVault.vault.id, input: legacyEvent },
+      { action: "create", resource: priorVaultId, input: legacyEvent },
       { action: "pay", resource: legacyEventId, input: legacyPay },
     ]) {
       const fingerprint = createHash("sha256")
@@ -759,16 +784,62 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
         "utf8",
       ),
     );
-    const migratedEvent = await store.events.create(
-      legacyOwner,
-      priorVault.vault.id,
-      {
-        ...legacyEvent,
-        allocations: [...legacyEvent.allocations].reverse(),
-      },
+    await db.exec(
+      await readFile(
+        new URL("../migrations/005_currencies.sql", import.meta.url),
+        "utf8",
+      ),
     );
+    const currencyRows = await db.query<{ code: string; minorUnits: number }>(
+      'SELECT code,minor_units AS "minorUnits" FROM currencies',
+    );
+    assert.deepEqual(
+      Object.fromEntries(
+        currencyRows.rows.map(({ code, minorUnits }) => [code, minorUnits]),
+      ),
+      Object.fromEntries(
+        Object.entries(catalog).map(([code, entry]) => [
+          code,
+          entry.minorUnits,
+        ]),
+      ),
+    );
+    await assert.rejects(
+      db.query(
+        "UPDATE vault_events SET currency='USD' WHERE owner_id=$1 AND id=$2",
+        [legacyOwner.id, legacyEventId],
+      ),
+      { code: "23503" },
+    );
+    await assert.rejects(
+      db.query("UPDATE vaults SET currency='USD' WHERE owner_id=$1 AND id=$2", [
+        legacyOwner.id,
+        priorVaultId,
+      ]),
+      { code: "23503" },
+    );
+
+    const migratedEvent = await store.events.create(legacyOwner, priorVaultId, {
+      ...legacyEvent,
+      allocations: [...legacyEvent.allocations].reverse(),
+    });
     assert.equal(migratedEvent.id, legacyEventId);
     assert.equal(migratedEvent.partialPayments, true);
+    assert.equal(migratedEvent.currency, "AED");
+    assert.equal(migratedEvent.totalMinor, legacyEvent.totalMinor);
+    assert.deepEqual(
+      migratedEvent.participants.map(
+        ({ name, shareMinor, remainingMinor }) => ({
+          name,
+          shareMinor,
+          remainingMinor,
+        }),
+      ),
+      [
+        { name: "Me", shareMinor: 40, remainingMinor: 0 },
+        { name: person.name, shareMinor: 60, remainingMinor: 50 },
+      ],
+    );
     assert.equal(migratedEvent.balance.receivableMinor, 50);
     assert.deepEqual(migratedEvent.payments, [
       {
@@ -783,16 +854,38 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
       migratedEvent,
     );
     await assert.rejects(
-      store.events.create(legacyOwner, priorVault.vault.id, {
+      store.events.create(legacyOwner, priorVaultId, {
         ...legacyEvent,
         partialPayments: true,
       }),
       { code: "IDEMPOTENCY_CONFLICT" },
     );
     assert.deepEqual(
-      await store.directory.vault(legacyOwner, priorVault.vault.id),
+      await store.directory.vault(legacyOwner, priorVaultId),
       before,
     );
+    const quote = {
+      baseCurrency: "RUB" as const,
+      quoteCurrency: "AED" as const,
+      rate: "0.040000000001",
+      source: "manual" as const,
+      asOf: timestamp,
+    };
+    const settings = { mainCurrency: "RUB" as const, rates: [quote] };
+    assert.deepEqual(
+      await store.currencySettings.put(owner, settings),
+      settings,
+    );
+    const reloaded = new PostgresStore(adapter);
+    assert.deepEqual(await reloaded.currencySettings.get(owner), settings);
+    assert.deepEqual(await reloaded.currencySettings.get(legacyOwner), {
+      mainCurrency: "USD",
+      rates: [],
+    });
+    await assert.rejects(
+      store.currencySettings.put(owner, { ...settings, rates: [quote, quote] }),
+    );
+    assert.deepEqual(await reloaded.currencySettings.get(owner), settings);
     const result = await lifecycle(store);
     await paymentPolicy(store);
     assert.deepEqual(await store.listFor(owner), debtBefore);
@@ -801,6 +894,8 @@ test("SQL events preserve base data, owner isolation, idempotent history, RLS an
         "vault_events",
         "event_payments",
         "event_requests",
+        "currencies",
+        "currency_settings",
       ]) {
         const row = (
           await db.query<{ allowed: boolean; relrowsecurity: boolean }>(
@@ -1253,6 +1348,7 @@ test("SQL event routes preserve UUID case identity and semantic manual retry equ
       "002_people_vaults.sql",
       "003_account_events.sql",
       "004_event_partial_payments.sql",
+      "005_currencies.sql",
     ])
       await db.exec(
         await readFile(
