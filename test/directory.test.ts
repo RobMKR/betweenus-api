@@ -293,6 +293,17 @@ test("SQL migration preserves old debt data, enforces owner FKs/RLS and rolls ba
         "utf8",
       ),
     );
+    for (const file of [
+      "003_account_events.sql",
+      "004_event_partial_payments.sql",
+      "005_currencies.sql",
+    ])
+      await db.exec(
+        await readFile(
+          new URL(`../migrations/${file}`, import.meta.url),
+          "utf8",
+        ),
+      );
     assert.deepEqual(await store.listFor(owner), before);
     const id = await lifecycle(store.directory);
     const reader = new PostgresStore(adapter);
@@ -499,7 +510,13 @@ test("SQL UUID case variants share one identity and NUL text rejects before stor
   };
   const store = new PostgresStore(adapter);
   try {
-    for (const file of ["001_initial.sql", "002_people_vaults.sql"])
+    for (const file of [
+      "001_initial.sql",
+      "002_people_vaults.sql",
+      "003_account_events.sql",
+      "004_event_partial_payments.sql",
+      "005_currencies.sql",
+    ])
       await db.exec(
         await readFile(
           new URL(`../migrations/${file}`, import.meta.url),

@@ -148,7 +148,7 @@ test("validates integer money, currencies, emails, bounds and self debt", async 
       { amountMinor: 0 },
       { amountMinor: -1 },
       { amountMinor: 1_000_000_001 },
-      { currency: "USD" },
+      { currency: "XXX" },
       { borrowerEmail: "oops" },
       { borrowerEmail: "alex@example.com" },
       { description: "" },

@@ -11,6 +11,7 @@ import type {
 import type { SqlClient, SqlPool } from "./store.js";
 import { uuidInput } from "./validation.js";
 import { personInput, vaultInput } from "./directory.js";
+import { legacyCurrency, currencyInput, type Currency } from "./currency.js";
 export interface DirectoryStore {
   archive(user: Identity, id: string, archived: boolean): Promise<VaultDetail>;
   listPeople(user: Identity): Promise<SavedPerson[]>;
@@ -27,6 +28,12 @@ export interface DirectoryStore {
 }
 const notFound = () =>
   new ApiError(404, "NOT_FOUND", "Vault or person not found.");
+const currencyLocked = () =>
+  new ApiError(
+    409,
+    "VAULT_CURRENCY_LOCKED",
+    "A vault with events cannot change currency.",
+  );
 const maximum = () =>
   new ApiError(400, "MEMBER_LIMIT", "A vault supports at most 100 members.");
 export class MemoryDirectory implements DirectoryStore {
@@ -91,6 +98,7 @@ export class MemoryDirectory implements DirectoryStore {
         id: randomUUID(),
         title: input.title,
         kind: input.kind,
+        currency: input.currency ?? legacyCurrency,
         archived: false,
         memberIds: [...input.memberIds],
         createdAt: now,
@@ -125,6 +133,24 @@ export class MemoryDirectory implements DirectoryStore {
     return structuredClone(detail);
   }
 
+  // Called while MemoryEvents holds its write queue.
+  changeCurrency(
+    user: Identity,
+    id: string,
+    currency: Currency,
+    populated: boolean,
+  ) {
+    const detail = this.owned(user, id);
+    if (detail.vault.currency !== currency) {
+      if (populated) throw currencyLocked();
+      const audit = this.event(user, "currency_changed", null);
+      detail.vault.currency = currency;
+      detail.vault.updatedAt = audit.createdAt;
+      detail.history.push(audit);
+    }
+    return structuredClone(detail);
+  }
+
   async member(user: Identity, id: string, personId: string, add: boolean) {
     id = uuidInput.parse(id);
     personId = uuidInput.parse(personId);
@@ -152,7 +178,7 @@ export class MemoryDirectory implements DirectoryStore {
 const stamp = (column: string) =>
   `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const personColumns = `id,name,source,email,phone,${stamp("created_at")} AS "createdAt"`;
-const vaultColumns = `v.id,v.title,v.kind,v.archived,${stamp("v.created_at")} AS "createdAt",${stamp("v.updated_at")} AS "updatedAt",ARRAY(SELECT person_id::text FROM vault_members WHERE vault_id=v.id ORDER BY position) AS "memberIds"`;
+const vaultColumns = `v.id,v.title,v.kind,v.currency,v.archived,${stamp("v.created_at")} AS "createdAt",${stamp("v.updated_at")} AS "updatedAt",ARRAY(SELECT person_id::text FROM vault_members WHERE vault_id=v.id ORDER BY position) AS "memberIds"`;
 export class PostgresDirectory implements DirectoryStore {
   constructor(private pool: SqlPool) {}
   async listPeople(user: Identity) {
@@ -299,8 +325,14 @@ export class PostgresDirectory implements DirectoryStore {
     return this.transaction(async (client) => {
       const id = randomUUID();
       await client.query(
-        "INSERT INTO vaults(id,owner_id,title,kind) VALUES($1,$2,$3,$4)",
-        [id, user.id, input.title, input.kind],
+        "INSERT INTO vaults(id,owner_id,title,kind,currency) VALUES($1,$2,$3,$4,$5)",
+        [
+          id,
+          user.id,
+          input.title,
+          input.kind,
+          input.currency ?? legacyCurrency,
+        ],
       );
       await this.history(client, user, id, "created", null);
       for (const personId of input.memberIds) {
@@ -314,6 +346,33 @@ export class PostgresDirectory implements DirectoryStore {
       return this.detail(client, user, id);
     });
   }
+  async changeCurrency(user: Identity, id: string, raw: Currency) {
+    id = uuidInput.parse(id);
+    const currency = currencyInput.parse(raw);
+    return this.transaction(async (client) => {
+      const current = (
+        await client.query<{ currency: Currency }>(
+          "SELECT currency FROM vaults WHERE owner_id=$1 AND id=$2 FOR UPDATE",
+          [user.id, id],
+        )
+      ).rows[0];
+      if (!current) throw notFound();
+      if (current.currency !== currency) {
+        const existing = await client.query(
+          "SELECT 1 FROM vault_events WHERE owner_id=$1 AND vault_id=$2 LIMIT 1",
+          [user.id, id],
+        );
+        if (existing.rows.length) throw currencyLocked();
+        await client.query(
+          "UPDATE vaults SET currency=$3,updated_at=clock_timestamp() WHERE owner_id=$1 AND id=$2",
+          [user.id, id, currency],
+        );
+        await this.history(client, user, id, "currency_changed", null);
+      }
+      return this.detail(client, user, id);
+    });
+  }
+
   async member(user: Identity, id: string, personId: string, add: boolean) {
     id = uuidInput.parse(id);
     personId = uuidInput.parse(personId);

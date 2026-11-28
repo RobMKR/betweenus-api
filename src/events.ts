@@ -3,6 +3,13 @@ import { z } from "zod";
 import { ApiError } from "./domain.js";
 import type { SavedPerson, Vault, VaultDetail } from "./directory.js";
 import { uuidInput, textInput } from "./validation.js";
+import {
+  aggregateBalances,
+  currencyInput,
+  emptyBalance,
+  type Currency,
+  type CurrencyBalance,
+} from "./currency.js";
 export const participantRef = z.union([z.literal("self"), uuidInput]);
 const minor = z.number().int().min(1).max(1_000_000_000);
 const calendarDate = z
@@ -20,7 +27,7 @@ export const eventInput = z
     clientRequestId: uuidInput,
     title: textInput(200),
     date: calendarDate,
-    currency: z.literal("AED"),
+    currency: currencyInput,
     totalMinor: minor,
     participantIds: z.array(participantRef).min(1).max(100),
     payerId: participantRef,
@@ -93,12 +100,7 @@ export const archiveInput = z.object({ archived: z.boolean() }).strict();
 export type EventInput = z.infer<typeof eventInput>;
 export type PaymentInput = z.infer<typeof paymentInput>;
 export type UndoInput = z.infer<typeof undoInput>;
-export type PrivateBalance = {
-  currency: "AED";
-  receivableMinor: number;
-  payableMinor: number;
-  netMinor: number;
-};
+export type PrivateBalance = CurrencyBalance;
 export type Participant = {
   participantId: string;
   name: string;
@@ -117,7 +119,7 @@ export type StoredEvent = {
   vaultId: string;
   title: string;
   date: string;
-  currency: "AED";
+  currency: Currency;
   totalMinor: number;
   payerId: string;
   splitMode: "equal" | "manual";
@@ -148,8 +150,16 @@ export function requireActive(archived: boolean) {
       "Reactivate this vault before changing events or payments.",
     );
 }
-export function emptyBalance(): PrivateBalance {
-  return { currency: "AED", receivableMinor: 0, payableMinor: 0, netMinor: 0 };
+export function requireVaultCurrency(
+  vaultCurrency: Currency,
+  eventCurrency: Currency,
+) {
+  if (vaultCurrency !== eventCurrency)
+    throw new ApiError(
+      409,
+      "VAULT_CURRENCY_MISMATCH",
+      "Event currency must match the vault currency.",
+    );
 }
 export function viewEvent(event: StoredEvent): AccountEvent {
   const participants = event.participants.map((person) => ({
@@ -162,7 +172,7 @@ export function viewEvent(event: StoredEvent): AccountEvent {
             .filter((payment) => payment.participantId === person.participantId)
             .reduce((sum, payment) => sum + payment.amountMinor, 0),
   }));
-  const balance = emptyBalance();
+  const balance = emptyBalance(event.currency);
   if (event.payerId === "self")
     balance.receivableMinor = participants
       .filter((p) => !p.isSelf)
@@ -173,21 +183,25 @@ export function viewEvent(event: StoredEvent): AccountEvent {
   balance.netMinor = balance.receivableMinor - balance.payableMinor;
   return { ...structuredClone(event), participants, balance };
 }
-export function privateBalances(events: AccountEvent[]): PrivateBalance[] {
-  const balance = emptyBalance();
-  for (const event of events) {
-    balance.receivableMinor += event.balance.receivableMinor;
-    balance.payableMinor += event.balance.payableMinor;
-  }
-  balance.netMinor = balance.receivableMinor - balance.payableMinor;
-  return [balance];
+export function privateBalances(
+  events: AccountEvent[],
+  fallback?: Currency,
+): PrivateBalance[] {
+  return aggregateBalances(
+    events.map((event) => event.balance),
+    fallback,
+  );
 }
 export function summarize(vault: Vault, events: AccountEvent[]): VaultSummary {
   const selected = events.filter((event) => event.vaultId === vault.id);
+  // An event can be committed after the directory read. Its currency is the
+  // definitive currency once a vault has activity.
+  const currency = selected[0]?.currency ?? vault.currency;
   return {
     ...structuredClone(vault),
+    currency,
     eventCount: selected.length,
-    balances: privateBalances(selected),
+    balances: privateBalances(selected, currency),
   };
 }
 export function makeEvent(

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { aggregateBalances, currencyInput, type Currency } from "./currency.js";
 export type Identity = { id: string; email: string };
 export type Debt = {
   id: string;
@@ -9,7 +10,7 @@ export type Debt = {
   borrowerId: string | null;
   status: "pending" | "accepted" | "disputed";
   amountMinor: number;
-  currency: "AED";
+  currency: Currency;
   description: string;
   createdAt: string;
   updatedAt: string;
@@ -31,7 +32,7 @@ export const createInput = z
   .object({
     borrowerEmail: email,
     amountMinor: z.number().int().positive().max(1_000_000_000),
-    currency: z.literal("AED"),
+    currency: currencyInput,
     description: z.string().trim().min(1).max(500),
   })
   .strict();
@@ -116,19 +117,17 @@ export function transition(
   };
 }
 export function balances(debts: Debt[], u: Identity) {
-  let receivableMinor = 0,
-    payableMinor = 0;
-  for (const d of debts) {
-    if (d.status !== "accepted") continue;
-    if (d.lenderId === u.id) receivableMinor += d.amountMinor;
-    if (d.borrowerId === u.id) payableMinor += d.amountMinor;
-  }
-  return [
-    {
-      currency: "AED",
-      receivableMinor,
-      payableMinor,
-      netMinor: receivableMinor - payableMinor,
-    },
-  ];
+  return aggregateBalances(
+    debts
+      .filter(
+        (debt) =>
+          debt.status === "accepted" &&
+          (debt.lenderId === u.id || debt.borrowerId === u.id),
+      )
+      .map((debt) => ({
+        currency: debt.currency,
+        receivableMinor: debt.lenderId === u.id ? debt.amountMinor : 0,
+        payableMinor: debt.borrowerId === u.id ? debt.amountMinor : 0,
+      })),
+  );
 }
